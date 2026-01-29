@@ -85,7 +85,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // AUTH
     if ($action === 'register') {
-        $user = trim(htmlspecialchars($input['username']));
+        $user = trim(htmlspecialchars(strtolower($input['username'])));
         if (strlen($user) > 30) { echo json_encode(['status'=>'error','message'=>'Username too long']); exit; }
         $pass = password_hash($input['password'], PASSWORD_DEFAULT);
         try {
@@ -99,7 +99,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
     if ($action === 'login') {
-        $stmt = $db->prepare("SELECT * FROM users WHERE username = ?");
+        $stmt = $db->prepare("SELECT * FROM users WHERE lower(username) = ?");
         $stmt->execute([$input['username']]);
         $row = $stmt->fetch();
         if ($row && password_verify($input['password'], $row['password'])) {
@@ -289,6 +289,7 @@ async function sub(){
     .light-mode .msg-meta { color:#777; }
     .light-mode .reply-ctx { background:#eee; color:#333; }
 
+    .e2ee-on { color: #00a884; }
     body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; background:var(--bg); color:var(--text); height:100vh; display:flex; overflow:hidden; }
     
     /* Layout */
@@ -730,6 +731,7 @@ function renderLists(){
         if(k.startsWith('mw_dm_')){
             let u=k.split('mw_dm_')[1];
             let h=JSON.parse(localStorage.getItem(k));
+            let sec=S.e2ee[u]?' e2ee-on':'';
             let last=h.length?h[h.length-1].message:'Start chatting';
             if(last.length>30)last=last.substring(0,30)+'...';
             let ou=S.online.find(x=>x.username==u);
@@ -737,7 +739,7 @@ function renderLists(){
             dh+=`<div class="list-item ${S.id==u?'active':''}" onclick="openChat('dm','${u}')">
                 <div class="avatar" style="background-image:url('${av}')">${av?'':u[0].toUpperCase()}</div>
                 <div style="flex:1"><div style="font-weight:bold">${u} ${ou?'<span style="color:#0f0;font-size:0.8em">●</span>':''}</div><div style="font-size:0.8em;color:#888">${last}</div></div>
-            </div>`;
+                <div class="btn-icon${sec}"><svg viewBox="0 0 24 24" width="16"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-9-2c0-1.66 1.34-3 3-3s3 1.34 3 3v2H9V6zm9 14H6V10h12v10zm-6-3c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2z"/></svg></div></div>`;
         }
     });
     document.getElementById('list-chats').innerHTML=dh;
@@ -757,7 +759,7 @@ function openChat(t,i){
     renderChat(); scrollToBottom(true);
     document.getElementById('input-box').style.visibility='visible';
     document.getElementById('main-view').classList.add('active');
-    document.getElementById('nav-panel').classList.add('hidden');
+        document.getElementById('nav-panel').classList.add('hidden');
     let tit=i, sub='', av='';
     document.getElementById('btn-e2ee').style.display=(t=='dm'?'block':'none');
     if(t=='dm'){
@@ -768,7 +770,7 @@ function openChat(t,i){
     } else {
         tit=S.groups[i].name; sub='Group';
         document.getElementById('chat-av').innerText='#';
-    }
+    }    document.getElementById('btn-e2ee').classList.toggle('e2ee-on', S.e2ee[S.id]);
     document.getElementById('chat-title').innerText=tit;
     document.getElementById('chat-sub').innerText=sub;
     

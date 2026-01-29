@@ -62,7 +62,7 @@ Simply toggle the login box to "Register" and create a username and password.
 ### Adding Contacts
 1.  Click the **+** button next to "Chats".
 2.  Type the exact username of the person you want to message.
-3.  Once the chat opens, say "Hi".
+3.  Once the chat opens, say "Hi"
 
 ### Group Chats
 *   **Create:** Go to the Groups tab, click **+**, name your group, and choose "Public" or "Private".

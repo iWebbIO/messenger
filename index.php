@@ -1,5 +1,8 @@
 <?php
 session_start();
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
 ini_set('upload_max_filesize', '10M');
 ini_set('post_max_size', '10M');
 
@@ -51,6 +54,11 @@ try {
         timestamp INTEGER
     )");
 
+    // Indexes for performance
+    $db->exec("CREATE INDEX IF NOT EXISTS idx_msg_to ON messages(to_user)");
+    $db->exec("CREATE INDEX IF NOT EXISTS idx_msg_group ON messages(group_id)");
+    $db->exec("CREATE INDEX IF NOT EXISTS idx_msg_ts ON messages(timestamp)");
+
 } catch (PDOException $e) { die("DB Error: " . $e->getMessage()); }
 
 // -------------------------------------------------------------------------
@@ -60,6 +68,13 @@ $action = $_GET['action'] ?? '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/json');
+
+    if (!isset($_SERVER['HTTP_X_CSRF_TOKEN']) || $_SERVER['HTTP_X_CSRF_TOKEN'] !== $_SESSION['csrf_token']) {
+        http_response_code(403);
+        echo json_encode(['status' => 'error', 'message' => 'CSRF validation failed']);
+        exit;
+    }
+
     $input = json_decode(file_get_contents('php://input'), true);
 
     // AUTH
@@ -69,6 +84,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             $stmt = $db->prepare("INSERT INTO users (username, password, joined_at, last_seen) VALUES (?, ?, ?, ?)");
             $stmt->execute([$user, $pass, time(), time()]);
+            session_regenerate_id(true);
             $_SESSION['user'] = $user;
             $_SESSION['uid'] = $db->lastInsertId();
             echo json_encode(['status' => 'success']);
@@ -80,6 +96,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $stmt->execute([$input['username']]);
         $row = $stmt->fetch();
         if ($row && password_verify($input['password'], $row['password'])) {
+            session_regenerate_id(true);
             $_SESSION['user'] = $row['username'];
             $_SESSION['uid'] = $row['id'];
             echo json_encode(['status' => 'success']);
@@ -142,54 +159,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else echo json_encode(['status' => 'error', 'message' => 'Invalid code']);
         exit;
     }
-}
 
-// POLLING
-if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'poll') {
-    if (!isset($_SESSION['user'])) { http_response_code(403); exit; }
-    $me = $_SESSION['user'];
-    $myId = $_SESSION['uid'];
+    // POLLING
+    if ($action === 'poll') {
+        if (!isset($_SESSION['user'])) { http_response_code(403); exit; }
+        $me = $_SESSION['user'];
+        $myId = $_SESSION['uid'];
 
-    $db->prepare("UPDATE users SET last_seen = ? WHERE id = ?")->execute([time(), $myId]);
+        $db->prepare("UPDATE users SET last_seen = ? WHERE id = ?")->execute([time(), $myId]);
+        // Cleanup old messages (1% chance)
+        if (rand(1, 100) === 1) $db->exec("DELETE FROM messages WHERE timestamp < " . (time() - 2592000));
 
-    // Self Profile
-    $myProfile = $db->prepare("SELECT username, avatar, joined_at FROM users WHERE id = ?");
-    $myProfile->execute([$myId]);
+        // Self Profile
+        $myProfile = $db->prepare("SELECT username, avatar, joined_at FROM users WHERE id = ?");
+        $myProfile->execute([$myId]);
 
-    // DMs (Fetch & Delete)
-    $db->beginTransaction();
-    $stmt = $db->prepare("SELECT * FROM messages WHERE to_user = ? ORDER BY id ASC");
-    $stmt->execute([$me]);
-    $dms = $stmt->fetchAll();
-    if (!empty($dms)) {
-        $ids = implode(',', array_column($dms, 'id'));
-        $db->exec("DELETE FROM messages WHERE id IN ($ids)");
-    }
-    $db->commit();
-
-    // Groups
-    $groups = $db->prepare("SELECT g.id, g.name, g.type, g.join_code, gm.last_received_id FROM groups g JOIN group_members gm ON g.id=gm.group_id WHERE gm.user_id=?");
-    $groups->execute([$myId]);
-    $myGroups = $groups->fetchAll();
-    
-    $grpMsgs = [];
-    foreach ($myGroups as $g) {
-        $stmt = $db->prepare("SELECT * FROM messages WHERE group_id = ? AND id > ? ORDER BY id ASC");
-        $stmt->execute([$g['id'], $g['last_received_id']]);
-        $msgs = $stmt->fetchAll();
-        if($msgs) {
-            $grpMsgs = array_merge($grpMsgs, $msgs);
-            $last = end($msgs)['id'];
-            $db->prepare("UPDATE group_members SET last_received_id = ? WHERE group_id = ? AND user_id = ?")->execute([$last, $g['id'], $myId]);
+        // DMs (Fetch & Delete)
+        $db->beginTransaction();
+        $stmt = $db->prepare("SELECT * FROM messages WHERE to_user = ? ORDER BY id ASC");
+        $stmt->execute([$me]);
+        $dms = $stmt->fetchAll();
+        if (!empty($dms)) {
+            $ids = implode(',', array_column($dms, 'id'));
+            $db->exec("DELETE FROM messages WHERE id IN ($ids)");
         }
-    }
-    
-    // Online Users
-    $online = $db->prepare("SELECT username, avatar, last_seen FROM users WHERE last_seen > ?");
-    $online->execute([time()-300]);
+        $db->commit();
 
-    echo json_encode(['profile' => $myProfile->fetch(), 'dms' => $dms, 'groups' => $myGroups, 'group_msgs' => $grpMsgs, 'online' => $online->fetchAll()]);
-    exit;
+        // Groups
+        $groups = $db->prepare("SELECT g.id, g.name, g.type, g.join_code, gm.last_received_id FROM groups g JOIN group_members gm ON g.id=gm.group_id WHERE gm.user_id=?");
+        $groups->execute([$myId]);
+        $myGroups = $groups->fetchAll();
+    
+        $grpMsgs = [];
+        foreach ($myGroups as $g) {
+            $stmt = $db->prepare("SELECT * FROM messages WHERE group_id = ? AND id > ? ORDER BY id ASC");
+            $stmt->execute([$g['id'], $g['last_received_id']]);
+            $msgs = $stmt->fetchAll();
+            if($msgs) {
+                $grpMsgs = array_merge($grpMsgs, $msgs);
+                $last = end($msgs)['id'];
+                $db->prepare("UPDATE group_members SET last_received_id = ? WHERE group_id = ? AND user_id = ?")->execute([$last, $g['id'], $myId]);
+            }
+        }
+    
+        // Online Users
+        $online = $db->prepare("SELECT username, avatar, last_seen FROM users WHERE last_seen > ?");
+        $online->execute([time()-300]);
+
+        echo json_encode(['profile' => $myProfile->fetch(), 'dms' => $dms, 'groups' => $myGroups, 'group_msgs' => $grpMsgs, 'online' => $online->fetchAll()]);
+        exit;
+    }
 }
 
 if ($action === 'logout') { session_destroy(); header("Location: index.php"); exit; }
@@ -217,10 +236,15 @@ button{width:100%;padding:12px;background:#00a884;color:#fff;border:none;border-
     <p style="color:#888;cursor:pointer;font-size:0.9rem" onclick="reg=!reg;document.getElementById('ttl').innerText=reg?'Register':'Login'">Toggle Login/Register</p>
 </div>
 <script>
+const CSRF_TOKEN = "<?php echo $_SESSION['csrf_token']; ?>";
 let reg=false;
 async function sub(){
     let u=document.getElementById('u').value,p=document.getElementById('p').value;
-    let r=await fetch('?action='+(reg?'register':'login'),{method:'POST',body:JSON.stringify({username:u,password:p})});
+    let r=await fetch('?action='+(reg?'register':'login'),{
+        method:'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRF-Token': CSRF_TOKEN},
+        body:JSON.stringify({username:u,password:p})
+    });
     let d=await r.json();
     if(d.status=='success')location.reload();else{let e=document.getElementById('err');e.innerText=d.message;e.style.display='block'}
 }
@@ -424,6 +448,7 @@ async function sub(){
 
 <script>
 const ME = "<?php echo $_SESSION['user']; ?>";
+const CSRF_TOKEN = "<?php echo $_SESSION['csrf_token']; ?>";
 let S = { tab:'chats', id:null, type:null, reply:null, dms:{}, groups:{}, online:[], notifs:[], keys:{pub:null,priv:null}, e2ee:{} };
 
 // --- MODAL UTILS ---
@@ -473,10 +498,18 @@ async function init(){
     poll(); setInterval(poll,2000);
 }
 
+async function req(act, data) {
+    return fetch('?action='+act, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRF-Token': CSRF_TOKEN},
+        body: JSON.stringify(data||{})
+    });
+}
+
 // --- CORE ---
 async function poll(){
     try {
-        let r=await fetch('?action=poll');
+        let r=await req('poll');
         let d=await r.json();
         S.online=d.online;
         if(d.profile){
@@ -552,7 +585,7 @@ function store(t,i,m){
 async function startE2EE(){
     if(S.type!='dm'||S.e2ee[S.id])return;
     let exp=await window.crypto.subtle.exportKey("jwk",S.keys.pub);
-    fetch('?action=send',{method:'POST',body:JSON.stringify({to_user:S.id,message:JSON.stringify(exp),type:'signal'})});
+    req('send', {to_user:S.id,message:JSON.stringify(exp),type:'signal'});
     alertModal("Security", "Key exchange requested.");
 }
 async function handleSignal(m){
@@ -666,7 +699,7 @@ async function send(){
         load.message=e.c; load.extra=e.i; load.type='enc';
     }
     if(S.type=='dm') load.to_user=S.id; else load.group_id=S.id;
-    await fetch('?action=send',{method:'POST',body:JSON.stringify(load)});
+    await req('send', load);
     store(S.type,S.id,{from_user:ME, message:txt, type:load.type=='enc'?'text':load.type, timestamp:Math.floor(Date.now()/1000), reply_to_id:S.reply});
     document.getElementById('txt').value=''; cancelReply();
 }
@@ -674,7 +707,7 @@ async function send(){
 function sendReact(ts,e){
     let ld={message:e,type:'react',extra:ts};
     if(S.type=='dm')ld.to_user=S.id; else ld.group_id=S.id;
-    fetch('?action=send',{method:'POST',body:JSON.stringify(ld)});
+    req('send', ld);
     let h=get(S.type,S.id);
     let m=h.find(x=>x.timestamp==ts);
     if(m){ if(!m.reacts)m.reacts={}; m.reacts[ME]=e; save(S.type,S.id,h); renderChat(); }
@@ -685,7 +718,7 @@ function uploadImg(inp){
     r.onload=()=>{
         let ld={message:r.result,type:'image'};
         if(S.type=='dm')ld.to_user=S.id; else ld.group_id=S.id;
-        fetch('?action=send',{method:'POST',body:JSON.stringify(ld)});
+        req('send', ld);
         store(S.type,S.id,{from_user:ME,message:r.result,type:'image',timestamp:Date.now()/1000});
     };
     r.readAsDataURL(f);
@@ -693,9 +726,9 @@ function uploadImg(inp){
 
 function cancelReply(){ S.reply=null; document.getElementById('reply-ui').style.display='none'; }
 function promptChat(){ promptModal("New Chat", "Username:", (u)=>{ if(u){ if(!get('dm',u).length)save('dm',u,[]); openChat('dm',u); switchTab('chats'); }}); }
-function createGroup(){ promptModal("New Group", "Group Name:", (n)=>{ if(n)fetch('?action=create_group',{method:'POST',body:JSON.stringify({name:n,type:'public'})}); }); }
-function joinGroup(){ promptModal("Join Group", "6-Digit Code:", (c)=>{ if(c)fetch('?action=join_group',{method:'POST',body:JSON.stringify({code:c})}); }); }
-function saveSettings(){ fetch('?action=update_profile',{method:'POST',body:JSON.stringify({avatar:document.getElementById('set-av').value,new_password:document.getElementById('set-pw').value})}); alertModal("Settings", "Profile updated."); }
+function createGroup(){ promptModal("New Group", "Group Name:", (n)=>{ if(n)req('create_group',{name:n,type:'public'}); }); }
+function joinGroup(){ promptModal("Join Group", "6-Digit Code:", (c)=>{ if(c)req('join_group',{code:c}); }); }
+function saveSettings(){ req('update_profile',{avatar:document.getElementById('set-av').value,new_password:document.getElementById('set-pw').value}); alertModal("Settings", "Profile updated."); }
 function scrollToBottom(){ let c=document.getElementById('msgs'); c.scrollTop=c.scrollHeight; }
 function esc(t){ return t?t.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"):"" }
 

@@ -562,9 +562,39 @@ function alertModal(t, m) { showModal(t, 'alert', m, null); }
 function confirmModal(t, m, cb) { showModal(t, 'confirm', m, cb); }
 
 // --- INIT ---
+async function loadKeys() {
+    let pub = localStorage.getItem('mw_key_pub');
+    let priv = localStorage.getItem('mw_key_priv');
+    if (pub && priv) {
+        S.keys.pub = await window.crypto.subtle.importKey("jwk", JSON.parse(pub), {name:"ECDH",namedCurve:"P-256"}, true, []);
+        S.keys.priv = await window.crypto.subtle.importKey("jwk", JSON.parse(priv), {name:"ECDH",namedCurve:"P-256"}, true, ["deriveKey"]);
+    } else {
+        let k = await window.crypto.subtle.generateKey({name:"ECDH",namedCurve:"P-256"}, true, ["deriveKey"]);
+        S.keys.pub = k.publicKey;
+        S.keys.priv = k.privateKey;
+        localStorage.setItem('mw_key_pub', JSON.stringify(await window.crypto.subtle.exportKey("jwk", k.publicKey)));
+        localStorage.setItem('mw_key_priv', JSON.stringify(await window.crypto.subtle.exportKey("jwk", k.privateKey)));
+    }
+}
+
+async function saveSession(u, k) {
+    S.e2ee[u] = k;
+    localStorage.setItem('mw_sess_' + u, JSON.stringify(await window.crypto.subtle.exportKey("jwk", k)));
+}
+
+async function loadSessions() {
+    for (let i = 0; i < localStorage.length; i++) {
+        let k = localStorage.key(i);
+        if (k.startsWith('mw_sess_')) {
+            let u = k.split('mw_sess_')[1];
+            S.e2ee[u] = await window.crypto.subtle.importKey("jwk", JSON.parse(localStorage.getItem(k)), {name:"AES-GCM",length:256}, false, ["encrypt","decrypt"]);
+        }
+    }
+}
+
 async function init(){
-    let k=await window.crypto.subtle.generateKey({name:"ECDH",namedCurve:"P-256"},true,["deriveKey"]);
-    S.keys.pub=k.publicKey; S.keys.priv=k.privateKey;
+    await loadKeys();
+    await loadSessions();
     if(localStorage.getItem('mw_theme')=='light') document.body.classList.add('light-mode');
     poll(); setInterval(poll,2000);
 }
@@ -689,7 +719,7 @@ async function handleSignalReq(m){
     confirmModal("Encryption Request", m.from_user + " wants to start a secure chat.", async (yes)=>{
         if(yes){
             let fk=await window.crypto.subtle.importKey("jwk",JSON.parse(m.message),{name:"ECDH",namedCurve:"P-256"},true,[]);
-            S.e2ee[m.from_user]=await window.crypto.subtle.deriveKey({name:"ECDH",public:fk},S.keys.priv,{name:"AES-GCM",length:256},false,["encrypt","decrypt"]);
+            await saveSession(m.from_user, await window.crypto.subtle.deriveKey({name:"ECDH",public:fk},S.keys.priv,{name:"AES-GCM",length:256},false,["encrypt","decrypt"]));
             let exp=await window.crypto.subtle.exportKey("jwk",S.keys.pub);
             req('send', {to_user:m.from_user, message:JSON.stringify(exp), type:'signal_ack'});
             alertModal("Security", "Secure channel established.");
@@ -698,7 +728,7 @@ async function handleSignalReq(m){
 }
 async function handleSignalAck(m){
     let fk=await window.crypto.subtle.importKey("jwk",JSON.parse(m.message),{name:"ECDH",namedCurve:"P-256"},true,[]);
-    S.e2ee[m.from_user]=await window.crypto.subtle.deriveKey({name:"ECDH",public:fk},S.keys.priv,{name:"AES-GCM",length:256},false,["encrypt","decrypt"]);
+    await saveSession(m.from_user, await window.crypto.subtle.deriveKey({name:"ECDH",public:fk},S.keys.priv,{name:"AES-GCM",length:256},false,["encrypt","decrypt"]));
     alertModal("Security", "Secure channel ready with "+m.from_user);
     if(S.id==m.from_user) { document.getElementById('btn-e2ee').classList.add('e2ee-on'); document.getElementById('txt').placeholder="Type an encrypted message..."; }
 }

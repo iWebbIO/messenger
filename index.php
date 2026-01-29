@@ -339,6 +339,7 @@ async function sub(){
     .msg.out { align-self:flex-end; background:var(--msg-out); border-top-right-radius:0; }
     .msg img { max-width:100%; border-radius:4px; margin-top:5px; cursor:pointer; }
     .msg audio { max-width:250px; margin-top:5px; }
+    .msg-sender { font-size:0.75rem; font-weight:bold; color:var(--accent); margin-bottom:4px; cursor:pointer; }
     .msg-meta { font-size:0.7rem; color:rgba(255,255,255,0.5); text-align:right; margin-top:2px; }
     .reaction-bar { position:absolute; bottom:-12px; right:0; background:#222; border-radius:10px; padding:2px 6px; font-size:0.8rem; box-shadow:0 2px 5px rgba(0,0,0,0.5); cursor:pointer; }
     
@@ -750,7 +751,9 @@ function store(t,i,m){
     }
     h.push(m); save(t,i,h);
     if(S.id==i && S.type==t) {
-        document.getElementById('msgs').appendChild(createMsgNode(m));
+        let prev = h.length>1 ? h[h.length-2] : null;
+        let show = (t=='public'||t=='group') && m.from_user!=ME && (!prev || prev.from_user!=m.from_user);
+        document.getElementById('msgs').appendChild(createMsgNode(m, show));
         scrollToBottom(false);
     }
 }
@@ -880,9 +883,12 @@ function openChat(t,i){
     if(t=='dm'){ let h=get('dm',i); let last=h.filter(x=>x.from_user==i).pop(); if(last && last.timestamp>lastRead){ lastRead=last.timestamp; req('send',{to_user:i,type:'read',extra:last.timestamp}); } }
 }
 
-function createMsgNode(m){
+function createMsgNode(m, showSender){
     let div=document.createElement('div');
     div.className=`msg ${m.from_user==ME?'out':'in'}`;
+    let sender='';
+    if(showSender) sender=`<div class="msg-sender" onclick="if(ME!='${m.from_user}'){openChat('dm','${m.from_user}');switchTab('chats');}">${m.from_user}</div>`;
+
     let txt=esc(m.message);
     if(m.type=='image') txt=`<img src="${m.message}" onclick="window.open(this.src)" onload="scrollToBottom(false)">`;
     else if(m.type=='audio') txt=`<audio controls src="${m.message}"></audio>`;
@@ -898,7 +904,7 @@ function createMsgNode(m){
     let stat='';
     if(m.from_user==ME && S.type=='dm') stat = m.read ? '<span style="color:#4fc3f7;margin-left:3px">✓✓</span>' : '<span style="margin-left:3px">✓</span>';
     if(m.pending) stat = '<span style="color:#888;margin-left:3px">🕒</span>';
-    div.innerHTML=`${rep}${txt}<div class="msg-meta">${new Date(m.timestamp*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})} ${stat}</div>${reacts}`;
+    div.innerHTML=`${sender}${rep}${txt}<div class="msg-meta">${new Date(m.timestamp*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})} ${stat}</div>${reacts}`;
     div.oncontextmenu=(e)=>{
         e.preventDefault(); S.reply=m.timestamp; 
         document.getElementById('reply-ui').style.display='flex'; 
@@ -912,7 +918,12 @@ function createMsgNode(m){
 function renderChat(){
     let c=document.getElementById('msgs'); c.innerHTML='';
     let h=get(S.type,S.id);
-    h.forEach(m=>c.appendChild(createMsgNode(m)));
+    let last=null;
+    h.forEach(m=>{
+        let show=(S.type=='public'||S.type=='group') && m.from_user!=ME && m.from_user!=last;
+        c.appendChild(createMsgNode(m, show));
+        last=m.from_user;
+    });
 }
 
 function closeChat() {

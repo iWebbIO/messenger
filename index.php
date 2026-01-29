@@ -4,8 +4,8 @@ session_start();
 if (empty($_SESSION['csrf_token'])) {
     $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
 }
-ini_set('upload_max_filesize', '10M');
-ini_set('post_max_size', '10M');
+ini_set('upload_max_filesize', '20M');
+ini_set('post_max_size', '20M');
 
 // -------------------------------------------------------------------------
 // 1. CONFIGURATION & DATABASE
@@ -138,7 +138,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $extra = $input['extra'] ?? null;
         $type = $input['type'] ?? 'text';
         $msg = $input['message'];
-        if (strlen($msg) > 10000) { echo json_encode(['status'=>'error','message'=>'Message too long']); exit; }
+        if (strlen($msg) > 15000000) { echo json_encode(['status'=>'error','message'=>'Message too long']); exit; }
 
         if (isset($input['to_user'])) {
             $stmt = $db->prepare("INSERT INTO messages (from_user, to_user, message, type, reply_to_id, extra_data, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)");
@@ -1007,6 +1007,7 @@ function toggleTheme(){
 
 function uploadFile(inp){
     let f=inp.files[0]; if(!f)return;
+    if(f.size > 10485760) { alertModal('Error','File too large (Max 10MB)'); return; }
     let r=new FileReader();
     r.onload=()=>{
         let ts = Math.floor(Date.now()/1000);

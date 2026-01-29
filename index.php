@@ -229,7 +229,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $typing = $db->prepare("SELECT username FROM users WHERE typing_to = ? AND typing_at > ?");
         $typing->execute([$me, time() - 5]);
 
-        echo json_encode(['profile' => $myProfile->fetch(), 'dms' => $dms, 'groups' => $myGroups, 'group_msgs' => $grpMsgs, 'online' => $online->fetchAll(), 'typing' => $typing->fetchAll(PDO::FETCH_COLUMN)]);
+        // Public Chat
+        $lastPub = $input['last_pub'] ?? 0;
+        $db->exec("DELETE FROM messages WHERE group_id = -1 AND timestamp < " . (time() - 300));
+        $stmt = $db->prepare("SELECT * FROM messages WHERE group_id = -1 AND id > ? ORDER BY id ASC");
+        $stmt->execute([$lastPub]);
+        $pubMsgs = $stmt->fetchAll();
+
+        echo json_encode(['profile' => $myProfile->fetch(), 'dms' => $dms, 'groups' => $myGroups, 'group_msgs' => $grpMsgs, 'public_msgs' => $pubMsgs, 'online' => $online->fetchAll(), 'typing' => $typing->fetchAll(PDO::FETCH_COLUMN)]);
         exit;
     }
 }
@@ -402,6 +409,9 @@ async function sub(){
         <div class="rail-btn" id="nav-about" onclick="switchTab('about')">
             <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
         </div>
+        <div class="rail-btn" id="nav-public" onclick="switchTab('public')">
+            <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+        </div>
         
         <div style="flex:1"></div>
         <div class="rail-btn" onclick="location.href='?action=logout'" title="Logout">
@@ -419,6 +429,10 @@ async function sub(){
             <div class="panel-header">Groups <div class="btn-icon" onclick="createGroup()">+</div></div>
             <div style="padding:10px"><button class="form-input" style="cursor:pointer" onclick="joinGroup()">Join via Code</button></div>
             <div class="list-area" id="list-groups"></div>
+        </div>
+        <div id="tab-public" class="tab-content" style="display:none">
+            <div class="panel-header">Online Users <span id="online-count" style="background:var(--accent);color:#fff;padding:2px 6px;border-radius:10px;font-size:0.8rem;margin-left:auto">0</span></div>
+            <div class="list-area" id="list-public"></div>
         </div>
         <div id="tab-settings" class="tab-content" style="display:none">
             <div class="panel-header">Settings</div>
@@ -617,7 +631,10 @@ async function pollLoop() {
 
 async function poll(){
     try {
-        let r=await req('poll');
+        let lastPub = 0;
+        let pubH = get('public', 'global');
+        if(pubH.length) lastPub = pubH[pubH.length-1].id || 0;
+        let r=await req('poll', {last_pub: lastPub});
         let d=await r.json();
         S.online=d.online;
         if(d.profile){
@@ -649,6 +666,12 @@ async function poll(){
             let prev = m.type==='text' ? m.message : '['+m.type+']';
             notify(m.group_id, prev, 'group'); 
         });
+        d.public_msgs.forEach(m=>{
+            store('public','global',m);
+            if(S.tab!='public') notify('global', m.message, 'public');
+        });
+        // Prune public
+        prunePublic();
         if(S.type=='dm' && d.typing && d.typing.includes(S.id)) document.getElementById('typing-ind').style.display='block'; else document.getElementById('typing-ind').style.display='none';
 
         renderLists();
@@ -662,10 +685,18 @@ async function poll(){
     } catch(e){}
 }
 
+function prunePublic(){
+    let h=get('public','global');
+    let now=Date.now()/1000;
+    let n=h.filter(x=>x.timestamp > now-300);
+    if(n.length!=h.length){ save('public','global',n); if(S.type=='public') renderChat(); }
+}
+
 function notify(id, text, type) {
     if(S.type === type && S.id == id && document.hasFocus()) return;
     if(S.notifs.some(n => n.id == id && n.text == text)) return;
-    S.notifs.unshift({id, type, text, title: type=='dm'?id:(S.groups[id]?S.groups[id].name:'Group'), time:new Date()});
+    let title = type=='dm'?id:(type=='public'?'Public Chat':(S.groups[id]?S.groups[id].name:'Group'));
+    S.notifs.unshift({id, type, text, title: title, time:new Date()});
     updateNotifUI();
     document.getElementById(type=='dm'?'badge-chats':'badge-groups').style.display = 'block';
 }
@@ -690,7 +721,7 @@ function openFromNotif(idx) {
     S.notifs.splice(idx, 1);
     updateNotifUI();
     toggleNotif(false);
-    switchTab(n.type == 'dm' ? 'chats' : 'groups');
+    switchTab(n.type == 'dm' ? 'chats' : (n.type=='public'?'public':'groups'));
     openChat(n.type, n.id);
 }
 
@@ -767,6 +798,8 @@ function switchTab(t){
     document.querySelectorAll('.rail-btn').forEach(e=>e.classList.remove('active'));
     document.getElementById('nav-'+t).classList.add('active');
     document.querySelectorAll('.tab-content').forEach(e=>e.style.display='none');
+    
+    if(t=='public') openChat('public', 'global');
     document.getElementById('tab-'+t).style.display='block';
     if(t=='chats') document.getElementById('badge-chats').style.display='none';
     if(t=='groups') document.getElementById('badge-groups').style.display='none';
@@ -800,6 +833,20 @@ function renderLists(){
         </div>`;
     });
     document.getElementById('list-groups').innerHTML=gh;
+
+    let ph=`<div class="list-item active" onclick="openChat('public','global')">
+        <div class="avatar">P</div>
+        <div><div style="font-weight:bold">Public Chat</div><div style="font-size:0.8em;color:#888">Click to view messages</div></div>
+    </div>`;
+    S.online.forEach(u=>{
+        let av=u.avatar||'';
+        ph+=`<div class="list-item" onclick="if(ME!='${u.username}'){openChat('dm','${u.username}');switchTab('chats');}">
+            <div class="avatar" style="background-image:url('${av}')">${av?'':u.username[0].toUpperCase()}</div>
+            <div><div style="font-weight:bold">${u.username}</div><div style="font-size:0.8em;color:#888">${u.bio||'Online'}</div></div>
+        </div>`;
+    });
+    document.getElementById('list-public').innerHTML=ph;
+    document.getElementById('online-count').innerText=S.online.length;
 }
 
 function openChat(t,i){
@@ -816,10 +863,14 @@ function openChat(t,i){
         sub=ou?(ou.bio||'Online'):'Offline'; av=ou?ou.avatar:'';
         if(av) document.getElementById('chat-av').style.backgroundImage=`url('${av}')`;
         document.getElementById('chat-av').innerText=av?'':i[0];
-    } else {
+    } else if(t=='group') {
         tit=S.groups[i].name; sub='Group';
         document.getElementById('chat-av').innerText='#';
-    }    document.getElementById('btn-e2ee').classList.toggle('e2ee-on', S.e2ee[S.id]);
+    } else if(t=='public') {
+        tit="Public Chat"; sub="Global Room (5m TTL)";
+        document.getElementById('chat-av').innerText='P';
+    }
+    document.getElementById('btn-e2ee').classList.toggle('e2ee-on', S.e2ee[S.id]);
     document.getElementById('chat-title').innerText=tit;
     document.getElementById('chat-sub').innerText=sub;
     document.getElementById('txt').placeholder = (t=='dm' && S.e2ee[S.id]) ? "Type an encrypted message..." : "Type a message...";
@@ -887,7 +938,7 @@ async function send(){
 
     // Prepare Network Request
     let load = { message: txt, type: 'text', reply_to: S.reply, timestamp: ts };
-    if(S.type=='dm') load.to_user=S.id; else load.group_id=S.id;
+    if(S.type=='dm') load.to_user=S.id; else if(S.type=='group') load.group_id=S.id; else if(S.type=='public') load.group_id=-1;
 
     try {
         if(S.type=='dm' && S.e2ee[S.id]){
@@ -906,7 +957,7 @@ async function send(){
 
 function sendReact(ts,e){
     let ld={message:e,type:'react',extra:ts};
-    if(S.type=='dm')ld.to_user=S.id; else ld.group_id=S.id;
+    if(S.type=='dm')ld.to_user=S.id; else if(S.type=='group') ld.group_id=S.id; else if(S.type=='public') ld.group_id=-1;
     req('send', ld);
     let h=get(S.type,S.id);
     let m=h.find(x=>x.timestamp==ts);
@@ -916,7 +967,7 @@ function sendReact(ts,e){
 function deleteMsg(){
     if(!S.reply)return;
     let ld={message:'DEL', type:'delete', extra:S.reply};
-    if(S.type=='dm')ld.to_user=S.id; else ld.group_id=S.id;
+    if(S.type=='dm')ld.to_user=S.id; else if(S.type=='group') ld.group_id=S.id; else if(S.type=='public') ld.group_id=-1;
     req('send', ld);
     removeMsg(S.type,S.id,S.reply); cancelReply();
 }
@@ -953,7 +1004,7 @@ function uploadImg(inp){
     r.onload=()=>{
         let ts = Math.floor(Date.now()/1000);
         let ld={message:r.result,type:'image',timestamp:ts};
-        if(S.type=='dm')ld.to_user=S.id; else ld.group_id=S.id;
+        if(S.type=='dm')ld.to_user=S.id; else if(S.type=='group') ld.group_id=S.id; else if(S.type=='public') ld.group_id=-1;
         req('send', ld);
         store(S.type,S.id,{from_user:ME,message:r.result,type:'image',timestamp:ts});
     };
@@ -992,7 +1043,7 @@ function stopRec(send){
             let b=new Blob(audChunks,{type:'audio/webm'}); let r=new FileReader();
             r.onload=()=>{ 
                 let ts=Math.floor(Date.now()/1000);
-                let ld={message:r.result,type:'audio',timestamp:ts}; if(S.type=='dm')ld.to_user=S.id; else ld.group_id=S.id; req('send',ld); store(S.type,S.id,{from_user:ME,message:r.result,type:'audio',timestamp:ts}); 
+                let ld={message:r.result,type:'audio',timestamp:ts}; if(S.type=='dm')ld.to_user=S.id; else if(S.type=='group') ld.group_id=S.id; else if(S.type=='public') ld.group_id=-1; req('send',ld); store(S.type,S.id,{from_user:ME,message:r.result,type:'audio',timestamp:ts}); 
             };
             r.readAsDataURL(b);
         }

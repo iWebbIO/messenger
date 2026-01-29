@@ -1042,7 +1042,7 @@ async function startRec(){
     try{
         let s=await navigator.mediaDevices.getUserMedia({audio:true});
         mediaRec=new MediaRecorder(s); audChunks=[];
-        mediaRec.ondataavailable=e=>audChunks.push(e.data);
+        mediaRec.ondataavailable=e=>{ if(e.data.size>0) audChunks.push(e.data); };
         mediaRec.start();
         document.getElementById('txt').style.display='none'; document.getElementById('btn-send').style.display='none'; document.getElementById('btn-att').style.display='none'; document.getElementById('btn-mic').style.display='none';
         document.getElementById('rec-ui').style.display='flex';
@@ -1051,10 +1051,14 @@ async function startRec(){
 function stopRec(send){
     if(!mediaRec)return;
     mediaRec.onstop=()=>{
+        mediaRec.stream.getTracks().forEach(t=>t.stop());
         document.getElementById('txt').style.display='block'; document.getElementById('btn-send').style.display='flex'; document.getElementById('btn-att').style.display='flex'; document.getElementById('btn-mic').style.display='flex';
         document.getElementById('rec-ui').style.display='none';
-        if(send){
-            let b=new Blob(audChunks,{type:'audio/webm'}); let r=new FileReader();
+        if(send && audChunks.length > 0){
+            let mime = mediaRec.mimeType || 'audio/webm';
+            let b=new Blob(audChunks,{type:mime}); 
+            if(b.size > 10485760) { alertModal('Error','Audio too large'); return; }
+            let r=new FileReader();
             r.onload=()=>{ 
                 let ts=Math.floor(Date.now()/1000);
                 let ld={message:r.result,type:'audio',timestamp:ts}; if(S.type=='dm')ld.to_user=S.id; else if(S.type=='group') ld.group_id=S.id; else if(S.type=='public') ld.group_id=-1; req('send',ld); store(S.type,S.id,{from_user:ME,message:r.result,type:'audio',timestamp:ts}); 
@@ -1062,7 +1066,7 @@ function stopRec(send){
             r.readAsDataURL(b);
         }
     };
-    mediaRec.stop(); mediaRec.stream.getTracks().forEach(t=>t.stop());
+    mediaRec.stop();
 }
 
 document.getElementById('txt').oninput=()=>{

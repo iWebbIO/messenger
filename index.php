@@ -1,4 +1,5 @@
 <?php
+header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none';");
 session_start();
 if (empty($_SESSION['csrf_token'])) {
     $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
@@ -80,6 +81,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // AUTH
     if ($action === 'register') {
         $user = trim(htmlspecialchars($input['username']));
+        if (strlen($user) > 30) { echo json_encode(['status'=>'error','message'=>'Username too long']); exit; }
         $pass = password_hash($input['password'], PASSWORD_DEFAULT);
         try {
             $stmt = $db->prepare("INSERT INTO users (username, password, joined_at, last_seen) VALUES (?, ?, ?, ?)");
@@ -127,6 +129,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $extra = $input['extra'] ?? null;
         $type = $input['type'] ?? 'text';
         $msg = $input['message'];
+        if (strlen($msg) > 10000) { echo json_encode(['status'=>'error','message'=>'Message too long']); exit; }
 
         if (isset($input['to_user'])) {
             $stmt = $db->prepare("INSERT INTO messages (from_user, to_user, message, type, reply_to_id, extra_data, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)");
@@ -436,7 +439,11 @@ async function sub(){
             </button>
             <input type="file" id="file" hidden accept="image/*" onchange="uploadImg(this)">
             <div class="input-wrapper">
-                <div class="reply-ctx" id="reply-ui"><span id="reply-txt"></span><span onclick="cancelReply()" style="cursor:pointer">&times;</span></div>
+                <div class="reply-ctx" id="reply-ui">
+                    <span id="reply-txt"></span>
+                    <button id="del-btn" class="btn-icon" style="display:none;font-size:0.8rem;color:#f55;margin-right:10px" onclick="deleteMsg()">Delete</button>
+                    <span onclick="cancelReply()" style="cursor:pointer">&times;</span>
+                </div>
                 <input type="text" id="txt" placeholder="Type a message..." autocomplete="off">
             </div>
             <button class="btn-icon" style="color:var(--accent)" onclick="send()">
@@ -519,12 +526,16 @@ async function poll(){
         }
         d.dms.forEach(async m=>{
             if(m.type=='signal'){ handleSignal(m); return; }
+            if(m.type=='delete'){ removeMsg('dm',m.from_user,m.extra_data); return; }
             if(m.type=='enc'){ try{m.message=await dec(m.from_user,m.message,m.extra_data)}catch(e){m.message="[Encrypted]"} }
             store('dm',m.from_user,m);
             notify(m.from_user, m.message, 'dm');
         });
         S.groups={}; d.groups.forEach(g=>{ S.groups[g.id]=g; if(!get('group',g.id)) save('group',g.id,[]); });
-        d.group_msgs.forEach(m=>{ store('group',m.group_id,m); notify(m.group_id, m.message, 'group'); });
+        d.group_msgs.forEach(m=>{ 
+            if(m.type=='delete'){ removeMsg('group',m.group_id,m.extra_data); return; }
+            store('group',m.group_id,m); notify(m.group_id, m.message, 'group'); 
+        });
 
         renderLists();
         if(S.id) renderChat();
@@ -579,7 +590,12 @@ function store(t,i,m){
         return;
     }
     h.push(m); save(t,i,h);
-    if(S.id==i && S.type==t) scrollToBottom();
+    if(S.id==i && S.type==t) scrollToBottom(false);
+}
+function removeMsg(t,i,ts){
+    let h=get(t,i);
+    let idx=h.findIndex(x=>x.timestamp==ts);
+    if(idx!=-1){ h.splice(idx,1); save(t,i,h); if(S.id==i && S.type==t) renderChat(); }
 }
 
 async function startE2EE(){
@@ -644,7 +660,7 @@ function renderLists(){
 
 function openChat(t,i){
     S.type=t; S.id=i;
-    renderChat(); scrollToBottom();
+    renderChat(); scrollToBottom(true);
     document.getElementById('input-box').style.visibility='visible';
     document.getElementById('main-view').classList.add('active');
     document.getElementById('nav-panel').classList.add('hidden');
@@ -678,7 +694,12 @@ function renderChat(){
         let reacts='';
         if(m.reacts) reacts=`<div class="reaction-bar">${Object.values(m.reacts).join('')}</div>`;
         div.innerHTML=`${rep}${txt}<div class="msg-meta">${new Date(m.timestamp*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</div>${reacts}`;
-        div.oncontextmenu=(e)=>{e.preventDefault(); S.reply=m.timestamp; document.getElementById('reply-ui').style.display='flex'; document.getElementById('reply-txt').innerText="Replying...";};
+        div.oncontextmenu=(e)=>{
+            e.preventDefault(); S.reply=m.timestamp; 
+            document.getElementById('reply-ui').style.display='flex'; 
+            document.getElementById('reply-txt').innerText=m.from_user==ME?"Manage Message":"Replying...";
+            document.getElementById('del-btn').style.display=m.from_user==ME?'inline-block':'none';
+        };
         div.ondblclick=()=>{ promptModal('Reaction', 'Enter emoji:', (e) => { if(e) sendReact(m.timestamp,e); }); };
         c.appendChild(div);
     });
@@ -701,7 +722,7 @@ async function send(){
     if(S.type=='dm') load.to_user=S.id; else load.group_id=S.id;
     await req('send', load);
     store(S.type,S.id,{from_user:ME, message:txt, type:load.type=='enc'?'text':load.type, timestamp:Math.floor(Date.now()/1000), reply_to_id:S.reply});
-    document.getElementById('txt').value=''; cancelReply();
+    document.getElementById('txt').value=''; cancelReply(); scrollToBottom(true);
 }
 
 function sendReact(ts,e){
@@ -711,6 +732,14 @@ function sendReact(ts,e){
     let h=get(S.type,S.id);
     let m=h.find(x=>x.timestamp==ts);
     if(m){ if(!m.reacts)m.reacts={}; m.reacts[ME]=e; save(S.type,S.id,h); renderChat(); }
+}
+
+function deleteMsg(){
+    if(!S.reply)return;
+    let ld={message:'DEL', type:'delete', extra:S.reply};
+    if(S.type=='dm')ld.to_user=S.id; else ld.group_id=S.id;
+    req('send', ld);
+    removeMsg(S.type,S.id,S.reply); cancelReply();
 }
 
 function uploadImg(inp){
@@ -724,12 +753,15 @@ function uploadImg(inp){
     r.readAsDataURL(f);
 }
 
-function cancelReply(){ S.reply=null; document.getElementById('reply-ui').style.display='none'; }
+function cancelReply(){ S.reply=null; document.getElementById('reply-ui').style.display='none'; document.getElementById('del-btn').style.display='none'; }
 function promptChat(){ promptModal("New Chat", "Username:", (u)=>{ if(u){ if(!get('dm',u).length)save('dm',u,[]); openChat('dm',u); switchTab('chats'); }}); }
 function createGroup(){ promptModal("New Group", "Group Name:", (n)=>{ if(n)req('create_group',{name:n,type:'public'}); }); }
 function joinGroup(){ promptModal("Join Group", "6-Digit Code:", (c)=>{ if(c)req('join_group',{code:c}); }); }
 function saveSettings(){ req('update_profile',{avatar:document.getElementById('set-av').value,new_password:document.getElementById('set-pw').value}); alertModal("Settings", "Profile updated."); }
-function scrollToBottom(){ let c=document.getElementById('msgs'); c.scrollTop=c.scrollHeight; }
+function scrollToBottom(force){ 
+    let c=document.getElementById('msgs'); 
+    if(force || c.scrollHeight - c.scrollTop - c.clientHeight < 100) c.scrollTop=c.scrollHeight; 
+}
 function esc(t){ return t?t.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"):"" }
 
 document.getElementById('txt').onkeypress=e=>{if(e.key=='Enter')send()};

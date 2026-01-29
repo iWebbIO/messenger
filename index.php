@@ -132,7 +132,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // MESSAGING
     if ($action === 'send') {
-        $ts = time();
+        $ts = $input['timestamp'] ?? time();
         $reply = $input['reply_to'] ?? null;
         $extra = $input['extra'] ?? null;
         $type = $input['type'] ?? 'text';
@@ -700,6 +700,7 @@ async function handleSignalAck(m){
     let fk=await window.crypto.subtle.importKey("jwk",JSON.parse(m.message),{name:"ECDH",namedCurve:"P-256"},true,[]);
     S.e2ee[m.from_user]=await window.crypto.subtle.deriveKey({name:"ECDH",public:fk},S.keys.priv,{name:"AES-GCM",length:256},false,["encrypt","decrypt"]);
     alertModal("Security", "Secure channel ready with "+m.from_user);
+    if(S.id==m.from_user) { document.getElementById('btn-e2ee').classList.add('e2ee-on'); document.getElementById('txt').placeholder="Type an encrypted message..."; }
 }
 async function enc(u,txt){
     let iv=window.crypto.getRandomValues(new Uint8Array(12));
@@ -773,6 +774,7 @@ function openChat(t,i){
     }    document.getElementById('btn-e2ee').classList.toggle('e2ee-on', S.e2ee[S.id]);
     document.getElementById('chat-title').innerText=tit;
     document.getElementById('chat-sub').innerText=sub;
+    document.getElementById('txt').placeholder = (t=='dm' && S.e2ee[S.id]) ? "Type an encrypted message..." : "Type a message...";
     
     if(t=='dm'){ let h=get('dm',i); let last=h.filter(x=>x.from_user==i).pop(); if(last && last.timestamp>lastRead){ lastRead=last.timestamp; req('send',{to_user:i,type:'read',extra:last.timestamp}); } }
 }
@@ -796,7 +798,8 @@ function renderChat(){
         if(m.reacts) reacts=`<div class="reaction-bar">${Object.values(m.reacts).join('')}</div>`;
         let stat='';
         if(m.from_user==ME && S.type=='dm') stat = m.read ? '<span style="color:#4fc3f7;margin-left:3px">✓✓</span>' : '<span style="margin-left:3px">✓</span>';
-        div.innerHTML=`${rep}${txt}<div class="msg-meta">${new Date(m.timestamp*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}${stat}</div>${reacts}`;
+        if(m.pending) stat = '<span style="color:#888;margin-left:3px">🕒</span>';
+        div.innerHTML=`${rep}${txt}<div class="msg-meta">${new Date(m.timestamp*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})} ${stat}</div>${reacts}`;
         div.oncontextmenu=(e)=>{
             e.preventDefault(); S.reply=m.timestamp; 
             document.getElementById('reply-ui').style.display='flex'; 
@@ -817,15 +820,40 @@ function closeChat() {
 async function send(){
     let txt=document.getElementById('txt').value.trim();
     if(!txt)return;
-    let load={message:txt, type:'text', reply_to:S.reply};
-    if(S.type=='dm' && S.e2ee[S.id]){
-        let e=await enc(S.id,txt);
-        load.message=e.c; load.extra=e.i; load.type='enc';
-    }
+    
+    // Optimistic UI
+    document.getElementById('txt').value=''; 
+    cancelReply();
+    
+    let ts = Math.floor(Date.now()/1000);
+    let msgObj = {
+        from_user: ME,
+        message: txt,
+        type: 'text',
+        timestamp: ts,
+        reply_to_id: S.reply,
+        pending: true
+    };
+    store(S.type, S.id, msgObj);
+    scrollToBottom(true);
+
+    // Prepare Network Request
+    let load = { message: txt, type: 'text', reply_to: S.reply, timestamp: ts };
     if(S.type=='dm') load.to_user=S.id; else load.group_id=S.id;
-    await req('send', load);
-    store(S.type,S.id,{from_user:ME, message:txt, type:load.type=='enc'?'text':load.type, timestamp:Math.floor(Date.now()/1000), reply_to_id:S.reply});
-    document.getElementById('txt').value=''; cancelReply(); scrollToBottom(true);
+
+    try {
+        if(S.type=='dm' && S.e2ee[S.id]){
+            let e=await enc(S.id,txt);
+            load.message=e.c; load.extra=e.i; load.type='enc';
+        }
+        let r = await req('send', load);
+        let d = await r.json();
+        if(d.status === 'success') {
+            let h = get(S.type, S.id);
+            let m = h.find(x => x.timestamp == ts && x.message == txt);
+            if(m) { delete m.pending; save(S.type, S.id, h); renderChat(); }
+        }
+    } catch(e) { console.error(e); }
 }
 
 function sendReact(ts,e){
@@ -875,10 +903,11 @@ function toggleTheme(){
 function uploadImg(inp){
     let f=inp.files[0]; let r=new FileReader();
     r.onload=()=>{
-        let ld={message:r.result,type:'image'};
+        let ts = Math.floor(Date.now()/1000);
+        let ld={message:r.result,type:'image',timestamp:ts};
         if(S.type=='dm')ld.to_user=S.id; else ld.group_id=S.id;
         req('send', ld);
-        store(S.type,S.id,{from_user:ME,message:r.result,type:'image',timestamp:Date.now()/1000});
+        store(S.type,S.id,{from_user:ME,message:r.result,type:'image',timestamp:ts});
     };
     r.readAsDataURL(f);
 }
@@ -913,7 +942,10 @@ function stopRec(send){
         document.getElementById('rec-ui').style.display='none';
         if(send){
             let b=new Blob(audChunks,{type:'audio/webm'}); let r=new FileReader();
-            r.onload=()=>{ let ld={message:r.result,type:'audio'}; if(S.type=='dm')ld.to_user=S.id; else ld.group_id=S.id; req('send',ld); store(S.type,S.id,{from_user:ME,message:r.result,type:'audio',timestamp:Date.now()/1000}); };
+            r.onload=()=>{ 
+                let ts=Math.floor(Date.now()/1000);
+                let ld={message:r.result,type:'audio',timestamp:ts}; if(S.type=='dm')ld.to_user=S.id; else ld.group_id=S.id; req('send',ld); store(S.type,S.id,{from_user:ME,message:r.result,type:'audio',timestamp:ts}); 
+            };
             r.readAsDataURL(b);
         }
     };

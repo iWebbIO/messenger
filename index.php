@@ -681,7 +681,6 @@ async function poll(){
              document.getElementById('chat-sub').innerText=sub;
              if(ou && ou.avatar) document.getElementById('chat-av').style.backgroundImage=`url('${ou.avatar}')`;
         }
-        if(S.id) renderChat();
     } catch(e){}
 }
 
@@ -746,11 +745,14 @@ function store(t,i,m){
     }
     if(m.type=='react'){
         let tg=h.find(x=>x.timestamp==m.extra_data);
-        if(tg){ if(!tg.reacts)tg.reacts={}; tg.reacts[m.from_user]=m.message; save(t,i,h); }
+        if(tg){ if(!tg.reacts)tg.reacts={}; tg.reacts[m.from_user]=m.message; save(t,i,h); if(S.id==i && S.type==t) renderChat(); }
         return;
     }
     h.push(m); save(t,i,h);
-    if(S.id==i && S.type==t) scrollToBottom(false);
+    if(S.id==i && S.type==t) {
+        document.getElementById('msgs').appendChild(createMsgNode(m));
+        scrollToBottom(false);
+    }
 }
 function removeMsg(t,i,ts){
     let h=get(t,i);
@@ -878,36 +880,39 @@ function openChat(t,i){
     if(t=='dm'){ let h=get('dm',i); let last=h.filter(x=>x.from_user==i).pop(); if(last && last.timestamp>lastRead){ lastRead=last.timestamp; req('send',{to_user:i,type:'read',extra:last.timestamp}); } }
 }
 
+function createMsgNode(m){
+    let div=document.createElement('div');
+    div.className=`msg ${m.from_user==ME?'out':'in'}`;
+    let txt=esc(m.message);
+    if(m.type=='image') txt=`<img src="${m.message}" onclick="window.open(this.src)" onload="scrollToBottom(false)">`;
+    else if(m.type=='audio') txt=`<audio controls src="${m.message}"></audio>`;
+    
+    let rep='';
+    if(m.reply_to_id){
+        let h=get(S.type,S.id);
+        let p=h.find(x=>x.timestamp==m.reply_to_id);
+        if(p) rep=`<div style="font-size:0.8em;border-left:2px solid var(--accent);padding-left:4px;margin-bottom:4px;opacity:0.7">Reply: ${p.type=='image'?'Image':p.message.substring(0,20)}</div>`;
+    }
+    let reacts='';
+    if(m.reacts) reacts=`<div class="reaction-bar">${Object.values(m.reacts).join('')}</div>`;
+    let stat='';
+    if(m.from_user==ME && S.type=='dm') stat = m.read ? '<span style="color:#4fc3f7;margin-left:3px">✓✓</span>' : '<span style="margin-left:3px">✓</span>';
+    if(m.pending) stat = '<span style="color:#888;margin-left:3px">🕒</span>';
+    div.innerHTML=`${rep}${txt}<div class="msg-meta">${new Date(m.timestamp*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})} ${stat}</div>${reacts}`;
+    div.oncontextmenu=(e)=>{
+        e.preventDefault(); S.reply=m.timestamp; 
+        document.getElementById('reply-ui').style.display='flex'; 
+        document.getElementById('reply-txt').innerText=m.from_user==ME?"Manage Message":"Replying...";
+        document.getElementById('del-btn').style.display=m.from_user==ME?'inline-block':'none';
+    };
+    div.ondblclick=()=>{ promptModal('Reaction', 'Enter emoji:', (e) => { if(e) sendReact(m.timestamp,e); }); };
+    return div;
+}
+
 function renderChat(){
     let c=document.getElementById('msgs'); c.innerHTML='';
     let h=get(S.type,S.id);
-    h.forEach(m=>{
-        let div=document.createElement('div');
-        div.className=`msg ${m.from_user==ME?'out':'in'}`;
-        let txt=esc(m.message);
-        if(m.type=='image') txt=`<img src="${m.message}" onclick="window.open(this.src)">`;
-        else if(m.type=='audio') txt=`<audio controls src="${m.message}"></audio>`;
-        
-        let rep='';
-        if(m.reply_to_id){
-            let p=h.find(x=>x.timestamp==m.reply_to_id);
-            if(p) rep=`<div style="font-size:0.8em;border-left:2px solid var(--accent);padding-left:4px;margin-bottom:4px;opacity:0.7">Reply: ${p.type=='image'?'Image':p.message.substring(0,20)}</div>`;
-        }
-        let reacts='';
-        if(m.reacts) reacts=`<div class="reaction-bar">${Object.values(m.reacts).join('')}</div>`;
-        let stat='';
-        if(m.from_user==ME && S.type=='dm') stat = m.read ? '<span style="color:#4fc3f7;margin-left:3px">✓✓</span>' : '<span style="margin-left:3px">✓</span>';
-        if(m.pending) stat = '<span style="color:#888;margin-left:3px">🕒</span>';
-        div.innerHTML=`${rep}${txt}<div class="msg-meta">${new Date(m.timestamp*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})} ${stat}</div>${reacts}`;
-        div.oncontextmenu=(e)=>{
-            e.preventDefault(); S.reply=m.timestamp; 
-            document.getElementById('reply-ui').style.display='flex'; 
-            document.getElementById('reply-txt').innerText=m.from_user==ME?"Manage Message":"Replying...";
-            document.getElementById('del-btn').style.display=m.from_user==ME?'inline-block':'none';
-        };
-        div.ondblclick=()=>{ promptModal('Reaction', 'Enter emoji:', (e) => { if(e) sendReact(m.timestamp,e); }); };
-        c.appendChild(div);
-    });
+    h.forEach(m=>c.appendChild(createMsgNode(m)));
 }
 
 function closeChat() {
@@ -1018,7 +1023,8 @@ function joinGroup(){ promptModal("Join Group", "6-Digit Code:", (c)=>{ if(c)req
 function saveSettings(){ req('update_profile',{bio:document.getElementById('set-bio').value,avatar:document.getElementById('set-av').value,new_password:document.getElementById('set-pw').value}); alertModal("Settings", "Profile updated."); }
 function scrollToBottom(force){ 
     let c=document.getElementById('msgs'); 
-    if(force || c.scrollHeight - c.scrollTop - c.clientHeight < 100) c.scrollTop=c.scrollHeight; 
+    if(force) { c.scrollTop=c.scrollHeight; return; }
+    if(c.scrollHeight - c.scrollTop - c.clientHeight < 150) c.scrollTo({ top: c.scrollHeight, behavior: 'smooth' });
 }
 function esc(t){ return t?t.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"):"" }
 

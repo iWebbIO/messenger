@@ -60,6 +60,10 @@ try {
     $db->exec("CREATE INDEX IF NOT EXISTS idx_msg_group ON messages(group_id)");
     $db->exec("CREATE INDEX IF NOT EXISTS idx_msg_ts ON messages(timestamp)");
 
+    // Updates for features
+    try { $db->exec("ALTER TABLE users ADD COLUMN typing_to TEXT"); } catch(Exception $e){}
+    try { $db->exec("ALTER TABLE users ADD COLUMN typing_at INTEGER"); } catch(Exception $e){}
+
 } catch (PDOException $e) { die("DB Error: " . $e->getMessage()); }
 
 // -------------------------------------------------------------------------
@@ -163,6 +167,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
+    // TYPING
+    if ($action === 'typing') {
+        $db->prepare("UPDATE users SET typing_to = ?, typing_at = ? WHERE id = ?")->execute([$input['to'], time(), $myId]);
+        exit;
+    }
+
     // POLLING
     if ($action === 'poll') {
         if (!isset($_SESSION['user'])) { http_response_code(403); exit; }
@@ -209,7 +219,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $online = $db->prepare("SELECT username, avatar, last_seen FROM users WHERE last_seen > ?");
         $online->execute([time()-300]);
 
-        echo json_encode(['profile' => $myProfile->fetch(), 'dms' => $dms, 'groups' => $myGroups, 'group_msgs' => $grpMsgs, 'online' => $online->fetchAll()]);
+        // Typing
+        $typing = $db->prepare("SELECT username FROM users WHERE typing_to = ? AND typing_at > ?");
+        $typing->execute([$me, time() - 5]);
+
+        echo json_encode(['profile' => $myProfile->fetch(), 'dms' => $dms, 'groups' => $myGroups, 'group_msgs' => $grpMsgs, 'online' => $online->fetchAll(), 'typing' => $typing->fetchAll(PDO::FETCH_COLUMN)]);
         exit;
     }
 }
@@ -290,6 +304,11 @@ async function sub(){
     .notif-dropdown { position:absolute; top:40px; right:0; width:250px; background:#252525; border:1px solid #444; border-radius:8px; display:none; z-index:100; box-shadow:0 5px 15px rgba(0,0,0,0.5); overflow:hidden; }
     .notif-item { padding:12px; border-bottom:1px solid #333; font-size:0.85rem; cursor:pointer; }
     .notif-item:hover { background:#333; }
+
+    .menu-btn { cursor:pointer; color:#bbb; position:relative; }
+    .menu-dropdown { position:absolute; top:35px; right:0; background:#252525; border:1px solid #444; border-radius:8px; display:none; z-index:101; width:160px; box-shadow:0 5px 15px rgba(0,0,0,0.5); }
+    .menu-item { padding:12px; border-bottom:1px solid #333; font-size:0.9rem; cursor:pointer; display:block; color:#eee; }
+    .menu-item:hover { background:#333; }
 
     .messages { flex:1; overflow-y:auto; padding:20px; display:flex; flex-direction:column; gap:5px; }
     .msg { max-width:65%; padding:8px 12px; border-radius:8px; font-size:0.95rem; line-height:1.4; position:relative; word-wrap:break-word; }
@@ -416,7 +435,7 @@ async function sub(){
             <div style="display:flex;align-items:center">
                 <div class="back-btn" onclick="closeChat()">&larr;</div>
                 <div class="avatar" id="chat-av"></div>
-                <div><div id="chat-title" style="font-weight:bold"></div><div id="chat-sub" style="font-size:0.75rem;color:#999"></div></div>
+                <div><div id="chat-title" style="font-weight:bold"></div><div id="chat-sub" style="font-size:0.75rem;color:#999"></div><div id="typing-ind" style="font-size:0.7rem;color:var(--accent);display:none;font-style:italic">typing...</div></div>
             </div>
             
             <div class="header-actions">
@@ -427,6 +446,14 @@ async function sub(){
                     <svg viewBox="0 0 24 24" width="24" fill="currentColor"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.63-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.64 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2zm-2 1H8v-6c0-2.48 1.51-4.5 4-4.5s4 2.02 4 4.5v6z"/></svg>
                     <div class="notif-badge" id="notif-count">0</div>
                     <div class="notif-dropdown" id="notif-list"></div>
+                </div>
+                <div class="menu-btn" onclick="toggleMenu()">
+                    <svg viewBox="0 0 24 24" width="24" fill="currentColor"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
+                    <div class="menu-dropdown" id="chat-menu">
+                        <div class="menu-item" onclick="clearChat()">Clear History</div>
+                        <div class="menu-item" onclick="exportChat()">Export Chat</div>
+                        <div class="menu-item" onclick="deleteChat()">Delete Chat</div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -456,6 +483,7 @@ async function sub(){
 <script>
 const ME = "<?php echo $_SESSION['user']; ?>";
 const CSRF_TOKEN = "<?php echo $_SESSION['csrf_token']; ?>";
+let lastTyping = 0;
 let S = { tab:'chats', id:null, type:null, reply:null, dms:{}, groups:{}, online:[], notifs:[], keys:{pub:null,priv:null}, e2ee:{} };
 
 // --- MODAL UTILS ---
@@ -536,6 +564,7 @@ async function poll(){
             if(m.type=='delete'){ removeMsg('group',m.group_id,m.extra_data); return; }
             store('group',m.group_id,m); notify(m.group_id, m.message, 'group'); 
         });
+        if(S.type=='dm' && d.typing && d.typing.includes(S.id)) document.getElementById('typing-ind').style.display='block'; else document.getElementById('typing-ind').style.display='none';
 
         renderLists();
         if(S.id) renderChat();
@@ -576,6 +605,7 @@ function openFromNotif(idx) {
 
 function toggleNotif(force) {
     let el = document.getElementById('notif-list');
+    document.getElementById('chat-menu').style.display='none';
     if(force === false) el.style.display='none'; else el.style.display = (el.style.display=='block'?'none':'block');
 }
 
@@ -742,6 +772,29 @@ function deleteMsg(){
     removeMsg(S.type,S.id,S.reply); cancelReply();
 }
 
+function toggleMenu(){
+    let m=document.getElementById('chat-menu');
+    toggleNotif(false);
+    m.style.display=m.style.display=='block'?'none':'block';
+}
+function clearChat(){
+    if(!confirm("Clear history?")) return;
+    save(S.type, S.id, []); renderChat(); toggleMenu();
+}
+function exportChat(){
+    let h = get(S.type, S.id);
+    let blob = new Blob([JSON.stringify(h, null, 2)], {type : 'application/json'});
+    let a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `chat_${S.type}_${S.id}.json`;
+    a.click(); toggleMenu();
+}
+function deleteChat(){
+    if(!confirm("Delete chat permanently?")) return;
+    localStorage.removeItem(`mw_${S.type}_${S.id}`);
+    closeChat(); switchTab('chats'); toggleMenu();
+}
+
 function uploadImg(inp){
     let f=inp.files[0]; let r=new FileReader();
     r.onload=()=>{
@@ -765,7 +818,13 @@ function scrollToBottom(force){
 function esc(t){ return t?t.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"):"" }
 
 document.getElementById('txt').onkeypress=e=>{if(e.key=='Enter')send()};
-window.onclick=(e)=>{if(!e.target.closest('.notif-btn'))toggleNotif(false);};
+document.getElementById('txt').oninput=()=>{
+    if(S.type=='dm' && Date.now()-lastTyping>2000){ lastTyping=Date.now(); req('typing',{to:S.id}); }
+};
+window.onclick=(e)=>{
+    if(!e.target.closest('.notif-btn'))toggleNotif(false);
+    if(!e.target.closest('.menu-btn'))document.getElementById('chat-menu').style.display='none';
+};
 
 init();
 </script>

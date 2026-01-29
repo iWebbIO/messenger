@@ -16,6 +16,7 @@ try {
     $db = new PDO("sqlite:$dbFile");
     $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $db->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+    $db->exec("PRAGMA journal_mode=WAL;");
 
     // Tables
     $db->exec("CREATE TABLE IF NOT EXISTS users (
@@ -182,6 +183,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!isset($_SESSION['user'])) { http_response_code(403); exit; }
         $me = $_SESSION['user'];
         $myId = $_SESSION['uid'];
+        session_write_close();
 
         $db->prepare("UPDATE users SET last_seen = ? WHERE id = ?")->execute([time(), $myId]);
         // Cleanup old messages (1% chance)
@@ -596,7 +598,7 @@ async function init(){
     await loadKeys();
     await loadSessions();
     if(localStorage.getItem('mw_theme')=='light') document.body.classList.add('light-mode');
-    poll(); setInterval(poll,2000);
+    pollLoop();
 }
 
 async function req(act, data) {
@@ -608,6 +610,11 @@ async function req(act, data) {
 }
 
 // --- CORE ---
+async function pollLoop() {
+    await poll();
+    setTimeout(pollLoop, 2000);
+}
+
 async function poll(){
     try {
         let r=await req('poll');
@@ -631,13 +638,16 @@ async function poll(){
             }
             if(m.type=='enc'){ try{m.message=await dec(m.from_user,m.message,m.extra_data)}catch(e){m.message="[Encrypted]"} }
             store('dm',m.from_user,m);
-            notify(m.from_user, m.message, 'dm');
+            let prev = m.type==='text' ? m.message : '['+m.type+']';
+            notify(m.from_user, prev, 'dm');
             if(S.type=='dm' && S.id==m.from_user && document.hasFocus()) req('send', {to_user:m.from_user, type:'read', extra:m.timestamp});
         });
         S.groups={}; d.groups.forEach(g=>{ S.groups[g.id]=g; if(!get('group',g.id)) save('group',g.id,[]); });
         d.group_msgs.forEach(m=>{ 
             if(m.type=='delete'){ removeMsg('group',m.group_id,m.extra_data); return; }
-            store('group',m.group_id,m); notify(m.group_id, m.message, 'group'); 
+            store('group',m.group_id,m); 
+            let prev = m.type==='text' ? m.message : '['+m.type+']';
+            notify(m.group_id, prev, 'group'); 
         });
         if(S.type=='dm' && d.typing && d.typing.includes(S.id)) document.getElementById('typing-ind').style.display='block'; else document.getElementById('typing-ind').style.display='none';
 
@@ -653,7 +663,7 @@ async function poll(){
 }
 
 function notify(id, text, type) {
-    if(S.type === type && S.id == id) return;
+    if(S.type === type && S.id == id && document.hasFocus()) return;
     if(S.notifs.some(n => n.id == id && n.text == text)) return;
     S.notifs.unshift({id, type, text, title: type=='dm'?id:(S.groups[id]?S.groups[id].name:'Group'), time:new Date()});
     updateNotifUI();
@@ -668,8 +678,8 @@ function updateNotifUI() {
     let h = S.notifs.length===0 ? '<div style="padding:10px;text-align:center;color:#666">No notifications</div>' : '';
     S.notifs.slice(0,5).forEach((n,i) => {
         h += `<div class="notif-item" onclick="openFromNotif(${i})">
-            <b>${n.title}</b><span style="font-size:0.7rem;color:#888;float:right">${n.time.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</span><br>
-            ${n.text.substring(0,30)}...
+            <b>${esc(n.title)}</b><span style="font-size:0.7rem;color:#888;float:right">${n.time.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</span><br>
+            ${esc(n.text).substring(0,30)}...
         </div>`;
     });
     l.innerHTML = h;
@@ -691,10 +701,18 @@ function toggleNotif(force) {
 }
 
 function get(t,i){ let k=`mw_${t}_${i}`; return JSON.parse(localStorage.getItem(k))||[]; }
-function save(t,i,d){ localStorage.setItem(`mw_${t}_${i}`,JSON.stringify(d)); }
+function save(t,i,d){ try{ localStorage.setItem(`mw_${t}_${i}`,JSON.stringify(d)); }catch(e){ alertModal('Error','Storage full! Clear some chats.'); } }
 function store(t,i,m){
     let h=get(t,i);
-    if(h.find(x=>x.timestamp==m.timestamp && x.message==m.message)) return;
+    let idx = h.findIndex(x=>x.timestamp==m.timestamp && x.message==m.message);
+    if(idx !== -1) {
+        if(!m.pending && h[idx].pending) {
+            h[idx] = m;
+            save(t,i,h);
+            if(S.id==i && S.type==t) renderChat();
+        }
+        return;
+    }
     if(m.type=='react'){
         let tg=h.find(x=>x.timestamp==m.extra_data);
         if(tg){ if(!tg.reacts)tg.reacts={}; tg.reacts[m.from_user]=m.message; save(t,i,h); }

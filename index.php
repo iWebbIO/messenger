@@ -276,6 +276,15 @@ async function sub(){
 <title>moreweb Messenger</title>
 <style>
     :root { --bg:#121212; --rail:#0b0b0b; --panel:#1e1e1e; --border:#2a2a2a; --accent:#00a884; --text:#e0e0e0; --msg-in:#2c2c2c; --msg-out:#005c4b; }
+    .light-mode { --bg:#ffffff; --rail:#f0f0f0; --panel:#f5f5f5; --border:#ddd; --text:#111; --msg-in:#fff; --msg-out:#d9fdd3; }
+    .light-mode .rail-btn { color:#555; }
+    .light-mode .rail-btn:hover { background:#e0e0e0; color:#000; }
+    .light-mode .list-item:hover { background:#f0f0f0; }
+    .light-mode .list-item.active { background:#e6e6e6; }
+    .light-mode input { background:#fff; border:1px solid #ccc; color:#000; }
+    .light-mode .msg-meta { color:#777; }
+    .light-mode .reply-ctx { background:#eee; color:#333; }
+
     body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; background:var(--bg); color:var(--text); height:100vh; display:flex; overflow:hidden; }
     
     /* Layout */
@@ -410,6 +419,7 @@ async function sub(){
                 <p id="my-date" style="color:#777;font-size:0.8rem"></p>
                 <div class="form-group"><label>Avatar URL</label><input class="form-input" id="set-av"></div>
                 <div class="form-group"><label>New Password</label><input class="form-input" id="set-pw" type="password"></div>
+                <div class="form-group"><button class="btn-sec" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:4px;cursor:pointer;background:var(--panel);color:var(--text)" onclick="toggleTheme()">Toggle Dark/Light Mode</button></div>
                 <br><button class="btn-primary" onclick="saveSettings()">Save</button>
             </div>
         </div>
@@ -484,6 +494,7 @@ async function sub(){
 const ME = "<?php echo $_SESSION['user']; ?>";
 const CSRF_TOKEN = "<?php echo $_SESSION['csrf_token']; ?>";
 let lastTyping = 0;
+let lastRead = 0;
 let S = { tab:'chats', id:null, type:null, reply:null, dms:{}, groups:{}, online:[], notifs:[], keys:{pub:null,priv:null}, e2ee:{} };
 
 // --- MODAL UTILS ---
@@ -530,6 +541,7 @@ function alertModal(t, m) { showModal(t, 'alert', m, null); }
 async function init(){
     let k=await window.crypto.subtle.generateKey({name:"ECDH",namedCurve:"P-256"},true,["deriveKey"]);
     S.keys.pub=k.publicKey; S.keys.priv=k.privateKey;
+    if(localStorage.getItem('mw_theme')=='light') document.body.classList.add('light-mode');
     poll(); setInterval(poll,2000);
 }
 
@@ -555,9 +567,16 @@ async function poll(){
         d.dms.forEach(async m=>{
             if(m.type=='signal'){ handleSignal(m); return; }
             if(m.type=='delete'){ removeMsg('dm',m.from_user,m.extra_data); return; }
+            if(m.type=='read'){ 
+                let h=get('dm',m.from_user); 
+                h.forEach(x=>{if(x.from_user==ME && x.timestamp<=m.extra_data)x.read=true}); 
+                save('dm',m.from_user,h); if(S.id==m.from_user)renderChat(); 
+                return; 
+            }
             if(m.type=='enc'){ try{m.message=await dec(m.from_user,m.message,m.extra_data)}catch(e){m.message="[Encrypted]"} }
             store('dm',m.from_user,m);
             notify(m.from_user, m.message, 'dm');
+            if(S.type=='dm' && S.id==m.from_user && document.hasFocus()) req('send', {to_user:m.from_user, type:'read', extra:m.timestamp});
         });
         S.groups={}; d.groups.forEach(g=>{ S.groups[g.id]=g; if(!get('group',g.id)) save('group',g.id,[]); });
         d.group_msgs.forEach(m=>{ 
@@ -689,6 +708,7 @@ function renderLists(){
 }
 
 function openChat(t,i){
+    if(S.id!=i) lastRead=0;
     S.type=t; S.id=i;
     renderChat(); scrollToBottom(true);
     document.getElementById('input-box').style.visibility='visible';
@@ -707,6 +727,8 @@ function openChat(t,i){
     }
     document.getElementById('chat-title').innerText=tit;
     document.getElementById('chat-sub').innerText=sub;
+    
+    if(t=='dm'){ let h=get('dm',i); let last=h.filter(x=>x.from_user==i).pop(); if(last && last.timestamp>lastRead){ lastRead=last.timestamp; req('send',{to_user:i,type:'read',extra:last.timestamp}); } }
 }
 
 function renderChat(){
@@ -723,7 +745,9 @@ function renderChat(){
         }
         let reacts='';
         if(m.reacts) reacts=`<div class="reaction-bar">${Object.values(m.reacts).join('')}</div>`;
-        div.innerHTML=`${rep}${txt}<div class="msg-meta">${new Date(m.timestamp*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</div>${reacts}`;
+        let stat='';
+        if(m.from_user==ME && S.type=='dm') stat = m.read ? '<span style="color:#4fc3f7;margin-left:3px">✓✓</span>' : '<span style="margin-left:3px">✓</span>';
+        div.innerHTML=`${rep}${txt}<div class="msg-meta">${new Date(m.timestamp*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}${stat}</div>${reacts}`;
         div.oncontextmenu=(e)=>{
             e.preventDefault(); S.reply=m.timestamp; 
             document.getElementById('reply-ui').style.display='flex'; 
@@ -794,6 +818,10 @@ function deleteChat(){
     localStorage.removeItem(`mw_${S.type}_${S.id}`);
     closeChat(); switchTab('chats'); toggleMenu();
 }
+function toggleTheme(){
+    document.body.classList.toggle('light-mode');
+    localStorage.setItem('mw_theme', document.body.classList.contains('light-mode')?'light':'dark');
+}
 
 function uploadImg(inp){
     let f=inp.files[0]; let r=new FileReader();
@@ -825,6 +853,7 @@ window.onclick=(e)=>{
     if(!e.target.closest('.notif-btn'))toggleNotif(false);
     if(!e.target.closest('.menu-btn'))document.getElementById('chat-menu').style.display='none';
 };
+window.onfocus=()=>{ if(S.type=='dm'&&S.id) openChat('dm',S.id); };
 
 init();
 </script>

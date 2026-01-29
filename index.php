@@ -339,6 +339,8 @@ async function sub(){
     .msg.out { align-self:flex-end; background:var(--msg-out); border-top-right-radius:0; }
     .msg img { max-width:100%; border-radius:4px; margin-top:5px; cursor:pointer; }
     .msg audio { max-width:250px; margin-top:5px; }
+    .file-att { background:rgba(0,0,0,0.2); padding:10px; border-radius:5px; display:flex; align-items:center; gap:10px; cursor:pointer; border:1px solid rgba(255,255,255,0.1); margin-top:5px; }
+    .file-att:hover { background:rgba(0,0,0,0.3); }
     .msg-sender { font-size:0.75rem; font-weight:bold; color:var(--accent); margin-bottom:4px; cursor:pointer; }
     .msg-meta { font-size:0.7rem; color:rgba(255,255,255,0.5); text-align:right; margin-top:2px; }
     .reaction-bar { position:absolute; bottom:-12px; right:0; background:#222; border-radius:10px; padding:2px 6px; font-size:0.8rem; box-shadow:0 2px 5px rgba(0,0,0,0.5); cursor:pointer; }
@@ -501,7 +503,7 @@ async function sub(){
             <button class="btn-icon" id="btn-att" onclick="document.getElementById('file').click()">
                 <svg viewBox="0 0 24 24" width="24" fill="currentColor"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
             </button>
-            <input type="file" id="file" hidden accept="image/*" onchange="uploadImg(this)">
+            <input type="file" id="file" hidden onchange="uploadFile(this)">
             <button class="btn-icon" id="btn-mic" onclick="startRec()">
                 <svg viewBox="0 0 24 24" width="24" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/><path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>
             </button>
@@ -873,6 +875,13 @@ function createMsgNode(m, showSender){
     let txt=esc(m.message);
     if(m.type=='image') txt=`<img src="${m.message}" onclick="window.open(this.src)" onload="scrollToBottom(false)">`;
     else if(m.type=='audio') txt=`<audio controls src="${m.message}"></audio>`;
+    else if(m.type=='file') {
+        let fname = esc(m.extra_data || 'file');
+        let safeName = (m.extra_data || 'file').replace(/'/g, "\\'");
+        txt = `<div class="file-att" onclick="downloadFile('${m.message}', '${safeName}')">
+            <svg viewBox="0 0 24 24" width="24" fill="currentColor"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+            <span>${fname}</span></div>`;
+    }
     
     let rep='';
     if(m.reply_to_id){
@@ -996,16 +1005,22 @@ function toggleTheme(){
     localStorage.setItem('mw_theme', document.body.classList.contains('light-mode')?'light':'dark');
 }
 
-function uploadImg(inp){
-    let f=inp.files[0]; let r=new FileReader();
+function uploadFile(inp){
+    let f=inp.files[0]; if(!f)return;
+    let r=new FileReader();
     r.onload=()=>{
         let ts = Math.floor(Date.now()/1000);
-        let ld={message:r.result,type:'image',timestamp:ts};
+        let type = f.type.startsWith('image/') ? 'image' : 'file';
+        let ld={message:r.result,type:type,timestamp:ts,extra:f.name};
         if(S.type=='dm')ld.to_user=S.id; else if(S.type=='group') ld.group_id=S.id; else if(S.type=='public') ld.group_id=-1;
         req('send', ld);
-        store(S.type,S.id,{from_user:ME,message:r.result,type:'image',timestamp:ts});
+        store(S.type,S.id,{from_user:ME,message:r.result,type:type,timestamp:ts,extra_data:f.name});
     };
     r.readAsDataURL(f);
+}
+
+function downloadFile(data, name){
+    let a = document.createElement('a'); a.href = data; a.download = name; a.click();
 }
 
 function cancelReply(){ S.reply=null; document.getElementById('reply-ui').style.display='none'; document.getElementById('del-btn').style.display='none'; }

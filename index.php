@@ -673,8 +673,6 @@ async function poll(){
             store('public','global',m);
             if(S.tab!='public') notify('global', m.message, 'public');
         });
-        // Prune public
-        prunePublic();
         if(S.type=='dm' && d.typing && d.typing.includes(S.id)) document.getElementById('typing-ind').style.display='block'; else document.getElementById('typing-ind').style.display='none';
 
         renderLists();
@@ -685,13 +683,6 @@ async function poll(){
              if(ou && ou.avatar) document.getElementById('chat-av').style.backgroundImage=`url('${ou.avatar}')`;
         }
     } catch(e){}
-}
-
-function prunePublic(){
-    let h=get('public','global');
-    let now=Date.now()/1000;
-    let n=h.filter(x=>x.timestamp > now-300);
-    if(n.length!=h.length){ save('public','global',n); if(S.type=='public') renderChat(); }
 }
 
 function notify(id, text, type) {

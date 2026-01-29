@@ -431,9 +431,11 @@ async function sub(){
             <div style="padding:10px"><button class="form-input" style="cursor:pointer" onclick="joinGroup()">Join via Code</button></div>
             <div class="list-area" id="list-groups"></div>
         </div>
-        <div id="tab-public" class="tab-content" style="display:none">
-            <div class="panel-header">Online Users <span id="online-count" style="background:var(--accent);color:#fff;padding:2px 6px;border-radius:10px;font-size:0.8rem;margin-left:auto">0</span></div>
-            <div class="list-area" id="list-public"></div>
+        <div id="tab-public" class="tab-content" style="display:none;height:100%">
+            <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%">
+                <div style="font-size:1.2rem;color:#888">Online Users</div>
+                <div id="online-count" style="font-size:4rem;font-weight:bold;color:var(--accent)">0</div>
+            </div>
         </div>
         <div id="tab-settings" class="tab-content" style="display:none">
             <div class="panel-header">Settings</div>
@@ -839,18 +841,6 @@ function renderLists(){
     });
     document.getElementById('list-groups').innerHTML=gh;
 
-    let ph=`<div class="list-item active" onclick="openChat('public','global')">
-        <div class="avatar">P</div>
-        <div><div style="font-weight:bold">Public Chat</div><div style="font-size:0.8em;color:#888">Click to view messages</div></div>
-    </div>`;
-    S.online.forEach(u=>{
-        let av=u.avatar||'';
-        ph+=`<div class="list-item" onclick="if(ME!='${u.username}'){openChat('dm','${u.username}');switchTab('chats');}">
-            <div class="avatar" style="background-image:url('${av}')">${av?'':u.username[0].toUpperCase()}</div>
-            <div><div style="font-weight:bold">${u.username}</div><div style="font-size:0.8em;color:#888">${u.bio||'Online'}</div></div>
-        </div>`;
-    });
-    document.getElementById('list-public').innerHTML=ph;
     document.getElementById('online-count').innerText=S.online.length;
 }
 

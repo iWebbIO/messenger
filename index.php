@@ -63,6 +63,7 @@ try {
     // Updates for features
     try { $db->exec("ALTER TABLE users ADD COLUMN typing_to TEXT"); } catch(Exception $e){}
     try { $db->exec("ALTER TABLE users ADD COLUMN typing_at INTEGER"); } catch(Exception $e){}
+    try { $db->exec("ALTER TABLE users ADD COLUMN bio TEXT"); } catch(Exception $e){}
 
 } catch (PDOException $e) { die("DB Error: " . $e->getMessage()); }
 
@@ -121,6 +122,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         if (!empty($input['new_password'])) {
             $db->prepare("UPDATE users SET password = ? WHERE id = ?")->execute([password_hash($input['new_password'], PASSWORD_DEFAULT), $myId]);
+        }
+        if (isset($input['bio'])) {
+            $db->prepare("UPDATE users SET bio = ? WHERE id = ?")->execute([htmlspecialchars($input['bio']), $myId]);
         }
         echo json_encode(['status' => 'success']);
         exit;
@@ -184,7 +188,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (rand(1, 100) === 1) $db->exec("DELETE FROM messages WHERE timestamp < " . (time() - 2592000));
 
         // Self Profile
-        $myProfile = $db->prepare("SELECT username, avatar, joined_at FROM users WHERE id = ?");
+        $myProfile = $db->prepare("SELECT username, avatar, joined_at, bio FROM users WHERE id = ?");
         $myProfile->execute([$myId]);
 
         // DMs (Fetch & Delete)
@@ -216,7 +220,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     
         // Online Users
-        $online = $db->prepare("SELECT username, avatar, last_seen FROM users WHERE last_seen > ?");
+        $online = $db->prepare("SELECT username, avatar, last_seen, bio FROM users WHERE last_seen > ?");
         $online->execute([time()-300]);
 
         // Typing
@@ -324,6 +328,7 @@ async function sub(){
     .msg.in { align-self:flex-start; background:var(--msg-in); border-top-left-radius:0; }
     .msg.out { align-self:flex-end; background:var(--msg-out); border-top-right-radius:0; }
     .msg img { max-width:100%; border-radius:4px; margin-top:5px; cursor:pointer; }
+    .msg audio { max-width:250px; margin-top:5px; }
     .msg-meta { font-size:0.7rem; color:rgba(255,255,255,0.5); text-align:right; margin-top:2px; }
     .reaction-bar { position:absolute; bottom:-12px; right:0; background:#222; border-radius:10px; padding:2px 6px; font-size:0.8rem; box-shadow:0 2px 5px rgba(0,0,0,0.5); cursor:pointer; }
     
@@ -417,6 +422,7 @@ async function sub(){
                 <div class="avatar" id="my-av" style="width:80px;height:80px;margin:0 auto;font-size:2rem"></div>
                 <h3 id="my-name"></h3>
                 <p id="my-date" style="color:#777;font-size:0.8rem"></p>
+                <div class="form-group"><label>Bio / Status</label><input class="form-input" id="set-bio" maxlength="50"></div>
                 <div class="form-group"><label>Avatar URL</label><input class="form-input" id="set-av"></div>
                 <div class="form-group"><label>New Password</label><input class="form-input" id="set-pw" type="password"></div>
                 <div class="form-group"><button class="btn-sec" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:4px;cursor:pointer;background:var(--panel);color:var(--text)" onclick="toggleTheme()">Toggle Dark/Light Mode</button></div>
@@ -471,19 +477,27 @@ async function sub(){
         <div class="messages" id="msgs"></div>
 
         <div class="input-area" id="input-box" style="visibility:hidden">
-            <button class="btn-icon" onclick="document.getElementById('file').click()">
+            <button class="btn-icon" id="btn-att" onclick="document.getElementById('file').click()">
                 <svg viewBox="0 0 24 24" width="24" fill="currentColor"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
             </button>
             <input type="file" id="file" hidden accept="image/*" onchange="uploadImg(this)">
+            <button class="btn-icon" id="btn-mic" onclick="startRec()">
+                <svg viewBox="0 0 24 24" width="24" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/><path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>
+            </button>
             <div class="input-wrapper">
                 <div class="reply-ctx" id="reply-ui">
                     <span id="reply-txt"></span>
                     <button id="del-btn" class="btn-icon" style="display:none;font-size:0.8rem;color:#f55;margin-right:10px" onclick="deleteMsg()">Delete</button>
                     <span onclick="cancelReply()" style="cursor:pointer">&times;</span>
                 </div>
+                <div id="rec-ui" style="display:none;align-items:center;height:40px;background:#333;border-radius:20px;padding:0 15px;color:#f55">
+                    <span style="flex:1">Recording...</span>
+                    <span onclick="stopRec(false)" style="cursor:pointer;margin-right:15px;color:#ccc">&times;</span>
+                    <span onclick="stopRec(true)" style="cursor:pointer;color:var(--accent)">&#10004;</span>
+                </div>
                 <input type="text" id="txt" placeholder="Type a message..." autocomplete="off">
             </div>
-            <button class="btn-icon" style="color:var(--accent)" onclick="send()">
+            <button class="btn-icon" id="btn-send" style="color:var(--accent)" onclick="send()">
                 <svg viewBox="0 0 24 24" width="24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
             </button>
         </div>
@@ -495,6 +509,7 @@ const ME = "<?php echo $_SESSION['user']; ?>";
 const CSRF_TOKEN = "<?php echo $_SESSION['csrf_token']; ?>";
 let lastTyping = 0;
 let lastRead = 0;
+let mediaRec=null, audChunks=[];
 let S = { tab:'chats', id:null, type:null, reply:null, dms:{}, groups:{}, online:[], notifs:[], keys:{pub:null,priv:null}, e2ee:{} };
 
 // --- MODAL UTILS ---
@@ -562,6 +577,7 @@ async function poll(){
         if(d.profile){
             document.getElementById('my-av').style.backgroundImage=`url('${d.profile.avatar}')`;
             document.getElementById('my-name').innerText=d.profile.username;
+            document.getElementById('set-bio').value=d.profile.bio||'';
             document.getElementById('my-date').innerText="Joined: "+new Date(d.profile.joined_at*1000).toLocaleDateString();
         }
         d.dms.forEach(async m=>{
@@ -718,7 +734,7 @@ function openChat(t,i){
     document.getElementById('btn-e2ee').style.display=(t=='dm'?'block':'none');
     if(t=='dm'){
         let ou=S.online.find(x=>x.username==i);
-        sub=ou?'Online':'Offline'; av=ou?ou.avatar:'';
+        sub=ou?(ou.bio||'Online'):'Offline'; av=ou?ou.avatar:'';
         if(av) document.getElementById('chat-av').style.backgroundImage=`url('${av}')`;
         document.getElementById('chat-av').innerText=av?'':i[0];
     } else {
@@ -737,7 +753,10 @@ function renderChat(){
     h.forEach(m=>{
         let div=document.createElement('div');
         div.className=`msg ${m.from_user==ME?'out':'in'}`;
-        let txt=m.type=='image'?`<img src="${m.message}" onclick="window.open(this.src)">`:esc(m.message);
+        let txt=esc(m.message);
+        if(m.type=='image') txt=`<img src="${m.message}" onclick="window.open(this.src)">`;
+        else if(m.type=='audio') txt=`<audio controls src="${m.message}"></audio>`;
+        
         let rep='';
         if(m.reply_to_id){
             let p=h.find(x=>x.timestamp==m.reply_to_id);
@@ -838,7 +857,7 @@ function cancelReply(){ S.reply=null; document.getElementById('reply-ui').style.
 function promptChat(){ promptModal("New Chat", "Username:", (u)=>{ if(u){ if(!get('dm',u).length)save('dm',u,[]); openChat('dm',u); switchTab('chats'); }}); }
 function createGroup(){ promptModal("New Group", "Group Name:", (n)=>{ if(n)req('create_group',{name:n,type:'public'}); }); }
 function joinGroup(){ promptModal("Join Group", "6-Digit Code:", (c)=>{ if(c)req('join_group',{code:c}); }); }
-function saveSettings(){ req('update_profile',{avatar:document.getElementById('set-av').value,new_password:document.getElementById('set-pw').value}); alertModal("Settings", "Profile updated."); }
+function saveSettings(){ req('update_profile',{bio:document.getElementById('set-bio').value,avatar:document.getElementById('set-av').value,new_password:document.getElementById('set-pw').value}); alertModal("Settings", "Profile updated."); }
 function scrollToBottom(force){ 
     let c=document.getElementById('msgs'); 
     if(force || c.scrollHeight - c.scrollTop - c.clientHeight < 100) c.scrollTop=c.scrollHeight; 
@@ -846,6 +865,31 @@ function scrollToBottom(force){
 function esc(t){ return t?t.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"):"" }
 
 document.getElementById('txt').onkeypress=e=>{if(e.key=='Enter')send()};
+
+async function startRec(){
+    try{
+        let s=await navigator.mediaDevices.getUserMedia({audio:true});
+        mediaRec=new MediaRecorder(s); audChunks=[];
+        mediaRec.ondataavailable=e=>audChunks.push(e.data);
+        mediaRec.start();
+        document.getElementById('txt').style.display='none'; document.getElementById('btn-send').style.display='none'; document.getElementById('btn-att').style.display='none'; document.getElementById('btn-mic').style.display='none';
+        document.getElementById('rec-ui').style.display='flex';
+    }catch(e){alertModal('Error','Mic access denied');}
+}
+function stopRec(send){
+    if(!mediaRec)return;
+    mediaRec.onstop=()=>{
+        document.getElementById('txt').style.display='block'; document.getElementById('btn-send').style.display='flex'; document.getElementById('btn-att').style.display='flex'; document.getElementById('btn-mic').style.display='flex';
+        document.getElementById('rec-ui').style.display='none';
+        if(send){
+            let b=new Blob(audChunks,{type:'audio/webm'}); let r=new FileReader();
+            r.onload=()=>{ let ld={message:r.result,type:'audio'}; if(S.type=='dm')ld.to_user=S.id; else ld.group_id=S.id; req('send',ld); store(S.type,S.id,{from_user:ME,message:r.result,type:'audio',timestamp:Date.now()/1000}); };
+            r.readAsDataURL(b);
+        }
+    };
+    mediaRec.stop(); mediaRec.stream.getTracks().forEach(t=>t.stop());
+}
+
 document.getElementById('txt').oninput=()=>{
     if(S.type=='dm' && Date.now()-lastTyping>2000){ lastTyping=Date.now(); req('typing',{to:S.id}); }
 };

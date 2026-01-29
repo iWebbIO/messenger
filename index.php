@@ -1043,13 +1043,13 @@ async function startRec(){
         let s=await navigator.mediaDevices.getUserMedia({audio:true});
         mediaRec=new MediaRecorder(s); audChunks=[];
         mediaRec.ondataavailable=e=>{ if(e.data.size>0) audChunks.push(e.data); };
-        mediaRec.start();
+        mediaRec.start(200);
         document.getElementById('txt').style.display='none'; document.getElementById('btn-send').style.display='none'; document.getElementById('btn-att').style.display='none'; document.getElementById('btn-mic').style.display='none';
         document.getElementById('rec-ui').style.display='flex';
     }catch(e){alertModal('Error','Mic access denied');}
 }
 function stopRec(send){
-    if(!mediaRec)return;
+    if(!mediaRec || mediaRec.state==='inactive')return;
     mediaRec.onstop=()=>{
         mediaRec.stream.getTracks().forEach(t=>t.stop());
         document.getElementById('txt').style.display='block'; document.getElementById('btn-send').style.display='flex'; document.getElementById('btn-att').style.display='flex'; document.getElementById('btn-mic').style.display='flex';

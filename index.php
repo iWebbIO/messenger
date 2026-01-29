@@ -337,6 +337,7 @@ async function sub(){
     .reply-ctx { background:#2a2a2a; padding:6px 10px; border-radius:5px 5px 0 0; font-size:0.8rem; color:#aaa; display:none; justify-content:space-between; }
     input[type=text] { width:100%; padding:12px; border-radius:20px; border:none; background:#333; color:#fff; outline:none; box-sizing:border-box; }
     
+    #btn-e2ee svg { fill: var(--accent); }
     .btn-icon { background:none; border:none; color:#888; cursor:pointer; display:flex; align-items:center; justify-content:center; }
     .btn-icon:hover { color:#fff; }
     .btn-primary { background:var(--accent); color:#fff; border:none; padding:8px 16px; border-radius:20px; cursor:pointer; font-weight:bold; }
@@ -531,6 +532,12 @@ function showModal(title, type, placeholder, callback) {
         ip.placeholder = placeholder || '';
         ip.focus();
         cc.style.display = 'block';
+    } else if(type === 'confirm') {
+        bd.style.display = 'block';
+        bd.innerText = placeholder;
+        ip.style.display = 'none';
+        cc.style.display = 'block';
+        ok.innerText = 'Accept';
     } else {
         bd.style.display = 'block';
         bd.innerText = placeholder; // In alert mode, placeholder is body text
@@ -541,7 +548,7 @@ function showModal(title, type, placeholder, callback) {
     ok.onclick = () => {
         const val = ip.value;
         ov.style.display = 'none';
-        if(callback) callback(val);
+        if(callback) callback(type==='confirm'?true:val);
     };
     cc.onclick = () => { ov.style.display = 'none'; };
     ip.onkeydown = (e) => {
@@ -551,6 +558,7 @@ function showModal(title, type, placeholder, callback) {
 }
 function promptModal(t, p, cb) { showModal(t, 'prompt', p, cb); }
 function alertModal(t, m) { showModal(t, 'alert', m, null); }
+function confirmModal(t, m, cb) { showModal(t, 'confirm', m, cb); }
 
 // --- INIT ---
 async function init(){
@@ -581,7 +589,8 @@ async function poll(){
             document.getElementById('my-date').innerText="Joined: "+new Date(d.profile.joined_at*1000).toLocaleDateString();
         }
         d.dms.forEach(async m=>{
-            if(m.type=='signal'){ handleSignal(m); return; }
+            if(m.type=='signal_req'){ handleSignalReq(m); return; }
+            if(m.type=='signal_ack'){ handleSignalAck(m); return; }
             if(m.type=='delete'){ removeMsg('dm',m.from_user,m.extra_data); return; }
             if(m.type=='read'){ 
                 let h=get('dm',m.from_user); 
@@ -602,6 +611,12 @@ async function poll(){
         if(S.type=='dm' && d.typing && d.typing.includes(S.id)) document.getElementById('typing-ind').style.display='block'; else document.getElementById('typing-ind').style.display='none';
 
         renderLists();
+        if(S.type=='dm' && S.id){
+             let ou=d.online.find(x=>x.username==S.id);
+             let sub=ou?(ou.bio||'Online'):'Offline';
+             document.getElementById('chat-sub').innerText=sub;
+             if(ou && ou.avatar) document.getElementById('chat-av').style.backgroundImage=`url('${ou.avatar}')`;
+        }
         if(S.id) renderChat();
     } catch(e){}
 }
@@ -666,10 +681,21 @@ function removeMsg(t,i,ts){
 async function startE2EE(){
     if(S.type!='dm'||S.e2ee[S.id])return;
     let exp=await window.crypto.subtle.exportKey("jwk",S.keys.pub);
-    req('send', {to_user:S.id,message:JSON.stringify(exp),type:'signal'});
-    alertModal("Security", "Key exchange requested.");
+    req('send', {to_user:S.id,message:JSON.stringify(exp),type:'signal_req'});
+    alertModal("Security", "Encryption request sent. Waiting for approval...");
 }
-async function handleSignal(m){
+async function handleSignalReq(m){
+    confirmModal("Encryption Request", m.from_user + " wants to start a secure chat.", async (yes)=>{
+        if(yes){
+            let fk=await window.crypto.subtle.importKey("jwk",JSON.parse(m.message),{name:"ECDH",namedCurve:"P-256"},true,[]);
+            S.e2ee[m.from_user]=await window.crypto.subtle.deriveKey({name:"ECDH",public:fk},S.keys.priv,{name:"AES-GCM",length:256},false,["encrypt","decrypt"]);
+            let exp=await window.crypto.subtle.exportKey("jwk",S.keys.pub);
+            req('send', {to_user:m.from_user, message:JSON.stringify(exp), type:'signal_ack'});
+            alertModal("Security", "Secure channel established.");
+        }
+    });
+}
+async function handleSignalAck(m){
     let fk=await window.crypto.subtle.importKey("jwk",JSON.parse(m.message),{name:"ECDH",namedCurve:"P-256"},true,[]);
     S.e2ee[m.from_user]=await window.crypto.subtle.deriveKey({name:"ECDH",public:fk},S.keys.priv,{name:"AES-GCM",length:256},false,["encrypt","decrypt"]);
     alertModal("Security", "Secure channel ready with "+m.from_user);
@@ -677,7 +703,9 @@ async function handleSignal(m){
 async function enc(u,txt){
     let iv=window.crypto.getRandomValues(new Uint8Array(12));
     let buf=await window.crypto.subtle.encrypt({name:"AES-GCM",iv:iv},S.e2ee[u],new TextEncoder().encode(txt));
-    return {c:btoa(String.fromCharCode(...new Uint8Array(buf))),i:btoa(String.fromCharCode(...new Uint8Array(iv)))};
+    let b=''; new Uint8Array(buf).forEach(x=>b+=String.fromCharCode(x));
+    let i=''; iv.forEach(x=>i+=String.fromCharCode(x));
+    return {c:btoa(b),i:btoa(i)};
 }
 async function dec(u,c,i){
     let d=await window.crypto.subtle.decrypt({name:"AES-GCM",iv:Uint8Array.from(atob(i),c=>c.charCodeAt(0))},S.e2ee[u],Uint8Array.from(atob(c),c=>c.charCodeAt(0)));

@@ -73,6 +73,33 @@ try {
 // -------------------------------------------------------------------------
 $action = $_GET['action'] ?? '';
 
+if ($action === 'manifest') {
+    header('Content-Type: application/manifest+json');
+    echo json_encode([
+        "name" => "moreweb Messenger",
+        "short_name" => "Messenger",
+        "start_url" => "index.php",
+        "display" => "standalone",
+        "background_color" => "#121212",
+        "theme_color" => "#121212",
+        "icons" => [
+            ["src" => "?action=icon", "sizes" => "192x192", "type" => "image/svg+xml"],
+            ["src" => "?action=icon", "sizes" => "512x512", "type" => "image/svg+xml"]
+        ]
+    ]);
+    exit;
+}
+if ($action === 'icon') {
+    header('Content-Type: image/svg+xml');
+    echo '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="100" fill="#1e1e1e"/><path d="M256 85c-93 0-168 69-168 154 0 49 25 92 64 121v62l60-33c14 4 29 6 44 6 93 0 168-69 168-154S349 85 256 85z" fill="#00a884"/></svg>';
+    exit;
+}
+if ($action === 'sw') {
+    header('Content-Type: application/javascript');
+    echo "const CACHE='mw-v1';self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['index.php','?action=icon'])));self.skipWaiting()});self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('fetch',e=>{if(e.request.method!='GET')return;e.respondWith(fetch(e.request).catch(()=>caches.match(e.request)))});self.addEventListener('notificationclick',e=>{e.notification.close();e.waitUntil(clients.matchAll({type:'window',includeUncontrolled:true}).then(cl=>{for(let c of cl){if(c.url&&'focus'in c)return c.focus();}if(clients.openWindow)return clients.openWindow('index.php');}));});";
+    exit;
+}
+
 if ($action === 'get_profile') {
     header('Content-Type: application/json');
     $u = $_GET['u'] ?? '';
@@ -287,6 +314,9 @@ if (!isset($_SESSION['user'])) {
 <!DOCTYPE html>
 <html lang="en">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>moreweb Messenger - Login</title>
+<link rel="manifest" href="?action=manifest">
+<meta name="theme-color" content="#121212">
+<link rel="icon" href="?action=icon" type="image/svg+xml">
 <style>
 body{background:#121212;color:#eee;font-family:sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}
 .box{background:#1e1e1e;padding:2rem;border-radius:12px;width:300px;text-align:center;box-shadow:0 10px 30px rgba(0,0,0,0.5)}
@@ -314,6 +344,7 @@ async function sub(){
     let d=await r.json();
     if(d.status=='success')location.reload();else{let e=document.getElementById('err');e.innerText=d.message;e.style.display='block'}
 }
+if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
 </script></body></html>
 <?php exit; } ?>
 
@@ -322,6 +353,9 @@ async function sub(){
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<link rel="manifest" href="?action=manifest">
+<meta name="theme-color" content="#121212">
+<link rel="icon" href="?action=icon" type="image/svg+xml">
 <title>moreweb Messenger</title>
 <style>
     :root { --bg:#121212; --rail:#0b0b0b; --panel:#1e1e1e; --border:#2a2a2a; --accent:#00a884; --text:#e0e0e0; --msg-in:#2c2c2c; --msg-out:#005c4b; }
@@ -535,6 +569,7 @@ async function sub(){
                 <div class="form-group"><label>Avatar URL</label><input class="form-input" id="set-av"></div>
                 <div class="form-group"><label>New Password</label><input class="form-input" id="set-pw" type="password"></div>
                 <div class="form-group"><button class="btn-sec" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:4px;cursor:pointer;background:var(--panel);color:var(--text)" onclick="toggleTheme()">Toggle Dark/Light Mode</button></div>
+                <div class="form-group"><button class="btn-sec" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:4px;cursor:pointer;background:var(--panel);color:var(--text)" onclick="enableNotifs()">Enable Notifications</button></div>
                 <br><button class="btn-primary" onclick="saveSettings()">Save</button>
             </div>
         </div>
@@ -546,6 +581,7 @@ async function sub(){
                 <p style="color:#888;">Version 0.0.1</p>
                 <p>A secure, self-contained messenger with ephemeral server storage and local history persistence.</p>
                 <br>
+                <button class="btn-sec" style="margin-bottom:20px;cursor:pointer;padding:8px 16px;border-radius:20px" onclick="checkUpdates()">Check for Updates</button><br>
                 <a href="https://github.com/iWebbIO/php-messenger" target="_blank" class="about-link">
                     <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" style="vertical-align:middle"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
                     GitHub Repository
@@ -780,6 +816,12 @@ function notify(id, text, type) {
     S.notifs.unshift({id, type, text, title: title, time:new Date()});
     updateNotifUI();
     document.getElementById(type=='dm'?'badge-chats':'badge-groups').style.display = 'block';
+
+    if(Notification.permission==='granted'){
+        let opts={body:text,icon:'?action=icon',tag:'mw-'+id};
+        if(navigator.serviceWorker&&navigator.serviceWorker.controller) navigator.serviceWorker.ready.then(r=>r.showNotification(title,opts));
+        else new Notification(title,opts);
+    }
 }
 
 function updateNotifUI() {
@@ -1166,6 +1208,24 @@ function toggleTheme(){
     localStorage.setItem('mw_theme', document.body.classList.contains('light-mode')?'light':'dark');
 }
 
+function checkUpdates(){
+    if(!('serviceWorker' in navigator)){ alertModal('Info','Service Worker not active.'); return; }
+    navigator.serviceWorker.ready.then(r=>{
+        r.update().then(()=>{
+            if(r.installing || r.waiting) alertModal('Update','New version found! Restart app to apply.');
+            else alertModal('Info','You are up to date.');
+        });
+    });
+}
+
+function enableNotifs(){
+    if(!('Notification' in window)){ alertModal('Error','Notifications not supported'); return; }
+    Notification.requestPermission().then(p=>{
+        if(p==='granted') alertModal('Success','Notifications enabled');
+        else alertModal('Info','Notifications denied');
+    });
+}
+
 function uploadFile(inp){
     let f=inp.files[0]; if(!f)return;
     if(f.size > 10485760) { alertModal('Error','File too large (Max 10MB)'); return; }
@@ -1273,6 +1333,7 @@ window.oncontextmenu = (e) => {
 };
 window.onfocus=()=>{ if(S.type=='dm'&&S.id) openChat('dm',S.id); };
 
+if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
 init();
 </script>
 </body>

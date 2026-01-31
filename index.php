@@ -73,6 +73,15 @@ try {
 // -------------------------------------------------------------------------
 $action = $_GET['action'] ?? '';
 
+if ($action === 'get_profile') {
+    header('Content-Type: application/json');
+    $u = $_GET['u'] ?? '';
+    $stmt = $db->prepare("SELECT username, avatar, bio, joined_at, last_seen FROM users WHERE username = ?");
+    $stmt->execute([$u]);
+    echo json_encode($stmt->fetch() ?: ['status'=>'error']);
+    exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/json');
 
@@ -128,14 +137,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $db->prepare("UPDATE users SET bio = ? WHERE id = ?")->execute([htmlspecialchars($input['bio']), $myId]);
         }
         echo json_encode(['status' => 'success']);
-        exit;
-    }
-
-    if ($action === 'get_profile') {
-        $u = $_GET['u'] ?? '';
-        $stmt = $db->prepare("SELECT username, avatar, bio, joined_at, last_seen FROM users WHERE username = ?");
-        $stmt->execute([$u]);
-        echo json_encode($stmt->fetch() ?: ['status'=>'error']);
         exit;
     }
 
@@ -476,20 +477,7 @@ async function sub(){
 
 <!-- CONTEXT MENU -->
 <div id="ctx-menu" class="ctx-menu" style="display:none">
-    <div class="ctx-reactions">
-        <span class="ctx-reaction" onclick="ctxReact('❤️')">❤️</span>
-        <span class="ctx-reaction" onclick="ctxReact('😂')">😂</span>
-        <span class="ctx-reaction" onclick="ctxReact('😮')">😮</span>
-        <span class="ctx-reaction" onclick="ctxReact('😢')">😢</span>
-        <span class="ctx-reaction" onclick="ctxReact('👍')">👍</span>
-    </div>
-    <div class="ctx-item" onclick="ctxAction('reply')">Reply</div>
-    <div class="ctx-item" onclick="ctxAction('forward')">Forward</div>
-    <div class="ctx-item" onclick="ctxAction('copy')">Copy</div>
-    <div class="ctx-item" onclick="ctxAction('pin')">Pin Message</div>
-    <div class="ctx-item" onclick="ctxAction('details')">Details</div>
-    <div class="ctx-separator"></div>
-    <div class="ctx-item red-text" onclick="ctxAction('delete')">Delete</div>
+    <!-- Dynamic Content -->
 </div>
 
 <div class="app-container">
@@ -503,9 +491,6 @@ async function sub(){
             <svg viewBox="0 0 24 24"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
             <div class="rail-badge" id="badge-groups"></div>
         </div>
-        <div class="rail-btn" id="nav-settings" onclick="switchTab('settings')">
-            <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L3.16 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
-        </div>
         <div class="rail-btn" id="nav-public" onclick="switchTab('public')">
             <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
         </div>
@@ -513,6 +498,9 @@ async function sub(){
         <div style="flex:1" class="rail-spacer"></div>
         <div class="rail-btn" id="nav-about" onclick="switchTab('about')">
             <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+        </div>
+        <div class="rail-btn" id="nav-settings" onclick="switchTab('settings')">
+            <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L3.16 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
         </div>
         <div class="rail-btn" onclick="location.href='?action=logout'" title="Logout">
             <svg viewBox="0 0 24 24"><path d="M10.09 15.59L11.5 17l5-5-5-5-1.41 1.41L12.67 11H3v2h9.67l-2.58 2.59zM19 3H5c-1.11 0-2 .9-2 2v4h2V5h14v14H5v-4H3v4c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg>
@@ -584,7 +572,7 @@ async function sub(){
                     <div class="notif-badge" id="notif-count">0</div>
                     <div class="notif-dropdown" id="notif-list"></div>
                 </div>
-                <div class="menu-btn" onclick="toggleMenu()">
+                <div class="menu-btn" onclick="toggleMenu(event)">
                     <svg viewBox="0 0 24 24" width="24" fill="currentColor"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
                     <div class="menu-dropdown" id="chat-menu">
                         <div class="menu-item" onclick="clearChat()">Clear History</div>
@@ -631,7 +619,7 @@ const CSRF_TOKEN = "<?php echo $_SESSION['csrf_token']; ?>";
 let lastTyping = 0;
 let lastRead = 0;
 let mediaRec=null, audChunks=[];
-let S = { tab:'chats', id:null, type:null, reply:null, ctxMsg:null, dms:{}, groups:{}, online:[], notifs:[], keys:{pub:null,priv:null}, e2ee:{} };
+let S = { tab:'chats', id:null, type:null, reply:null, ctx:null, dms:{}, groups:{}, online:[], notifs:[], keys:{pub:null,priv:null}, e2ee:{} };
 
 // --- MODAL UTILS ---
 function showModal(title, type, placeholder, callback) {
@@ -918,7 +906,7 @@ function renderLists(){
             if(last.length>30)last=last.substring(0,30)+'...';
             let ou=S.online.find(x=>x.username==u);
             let av=ou?ou.avatar:'';
-            dh+=`<div class="list-item ${S.id==u?'active':''}" onclick="openChat('dm','${u}')">
+            dh+=`<div class="list-item ${S.id==u?'active':''}" onclick="openChat('dm','${u}')" oncontextmenu="onChatListContext(event, 'dm', '${u}')">
                 <div class="avatar" style="background-image:url('${av}')">${av?'':u[0].toUpperCase()}</div>
                 <div style="flex:1"><div style="font-weight:bold">${u} ${ou?'<span style="color:#0f0;font-size:0.8em">●</span>':''}</div><div style="font-size:0.8em;color:#888">${last}</div></div>
                 <div class="btn-icon${sec}"><svg viewBox="0 0 24 24" width="16"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-9-2c0-1.66 1.34-3 3-3s3 1.34 3 3v2H9V6zm9 14H6V10h12v10zm-6-3c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2z"/></svg></div></div>`;
@@ -928,7 +916,7 @@ function renderLists(){
     let gh='';
     Object.values(S.groups).forEach(g=>{
         if(filter && !g.name.toLowerCase().includes(filter)) return;
-        gh+=`<div class="list-item ${S.id==g.id?'active':''}" onclick="openChat('group',${g.id})">
+        gh+=`<div class="list-item ${S.id==g.id?'active':''}" onclick="openChat('group',${g.id})" oncontextmenu="onChatListContext(event, 'group', ${g.id})">
             <div class="avatar">#</div>
             <div><div style="font-weight:bold">${g.name}</div><div style="font-size:0.8em;color:#888">${g.type}</div></div>
         </div>`;
@@ -999,7 +987,7 @@ function createMsgNode(m, showSender){
     
     div.oncontextmenu=(e)=>{
         e.preventDefault();
-        showContextMenu(e, m);
+        showContextMenu(e, 'message', m);
     };
     div.ondblclick=()=>{ sendReact(m.timestamp, '❤️'); };
     return div;
@@ -1062,70 +1050,73 @@ async function send(){
 }
 
 // --- CONTEXT MENU ---
-function showContextMenu(e, m) {
-    S.ctxMsg = m;
+function showContextMenu(e, type, data) {
+    e.preventDefault();
+    S.ctx = {type, data};
     let menu = document.getElementById('ctx-menu');
+    let html = '';
+    
+    if(type == 'message') {
+        html = `<div class="ctx-reactions">
+        <span class="ctx-reaction" onclick="ctxAction('react','❤️')">❤️</span>
+        <span class="ctx-reaction" onclick="ctxAction('react','😂')">😂</span>
+        <span class="ctx-reaction" onclick="ctxAction('react','😮')">😮</span>
+        <span class="ctx-reaction" onclick="ctxAction('react','😢')">😢</span>
+        <span class="ctx-reaction" onclick="ctxAction('react','👍')">👍</span>
+        </div>
+        <div class="ctx-item" onclick="ctxAction('reply')">Reply</div>
+        <div class="ctx-item" onclick="ctxAction('forward')">Forward</div>
+        <div class="ctx-item" onclick="ctxAction('copy')">Copy</div>
+        <div class="ctx-item" onclick="ctxAction('pin')">Pin Message</div>
+        <div class="ctx-item" onclick="ctxAction('details')">Details</div>
+        <div class="ctx-separator"></div>
+        <div class="ctx-item red-text" onclick="ctxAction('delete')">Delete</div>`;
+    } else if(type == 'chat_list') {
+        html = `<div class="ctx-item" onclick="ctxAction('open')">Open</div>
+        <div class="ctx-item" onclick="ctxAction('clear')">Clear History</div>
+        <div class="ctx-separator"></div>
+        <div class="ctx-item red-text" onclick="ctxAction('del_chat')">Delete Chat</div>`;
+    } else {
+        html = `<div class="ctx-item" onclick="ctxAction('theme')">Toggle Theme</div>
+        <div class="ctx-item" onclick="ctxAction('settings')">Settings</div>
+        <div class="ctx-item" onclick="ctxAction('about')">About</div>`;
+    }
+    
+    menu.innerHTML = html;
     menu.style.display = 'block';
     
-    // Position
-    let x = e.clientX;
-    let y = e.clientY;
+    let x = e.clientX, y = e.clientY;
     if (x + 180 > window.innerWidth) x = window.innerWidth - 190;
-    if (y + 300 > window.innerHeight) y = window.innerHeight - 310;
-    
+    if (y + menu.offsetHeight > window.innerHeight) y = window.innerHeight - menu.offsetHeight;
     menu.style.left = x + 'px';
     menu.style.top = y + 'px';
 }
 
-function ctxReact(emoji) {
-    if(S.ctxMsg) sendReact(S.ctxMsg.timestamp, emoji);
+function onChatListContext(e, type, id) { showContextMenu(e, 'chat_list', {type, id}); }
+
+function ctxAction(act, arg) {
     document.getElementById('ctx-menu').style.display='none';
-}
-
-function ctxAction(act) {
-    let m = S.ctxMsg;
-    let menu = document.getElementById('ctx-menu');
-    menu.style.display='none';
-    if(!m) return;
-
-    if(act === 'reply') {
-        S.reply = m.timestamp;
-        document.getElementById('reply-ui').style.display='flex';
-        document.getElementById('reply-txt').innerText = "Replying to " + m.from_user;
-        document.getElementById('del-btn').style.display='none';
-        document.getElementById('txt').focus();
-    }
-    else if(act === 'forward') {
-        promptModal("Forward", "Enter username to forward to:", (u) => {
-            if(u) {
-                // Simple forward implementation: send as new message
-                let load = { message: m.message, type: m.type, extra: m.extra_data };
-                req('send', {...load, to_user: u});
-                alertModal("Forward", "Message forwarded to " + u);
-            }
-        });
-    }
-    else if(act === 'copy') {
-        if(m.type === 'text') navigator.clipboard.writeText(m.message);
-        else alertModal("Info", "Can only copy text messages.");
-    }
-    else if(act === 'pin') {
-        let h = get(S.type, S.id);
-        let target = h.find(x => x.timestamp == m.timestamp);
-        if(target) {
-            target.pinned = !target.pinned;
-            save(S.type, S.id, h);
-            renderChat();
-        }
-    }
-    else if(act === 'details') {
-        let info = `From: ${m.from_user}\nTime: ${new Date(m.timestamp*1000).toLocaleString()}\nType: ${m.type}`;
-        alertModal("Message Details", info);
-    }
-    else if(act === 'delete') {
-        if(m.from_user !== ME) { alertModal("Error", "You can only delete your own messages."); return; }
-        S.reply = m.timestamp; // Hack to reuse deleteMsg logic
-        deleteMsg();
+    let c = S.ctx;
+    if(!c) return;
+    
+    if(c.type == 'message') {
+        let m = c.data;
+        if(act=='react') sendReact(m.timestamp, arg);
+        else if(act=='reply') { S.reply=m.timestamp; document.getElementById('reply-ui').style.display='flex'; document.getElementById('reply-txt').innerText="Replying to "+m.from_user; document.getElementById('del-btn').style.display='none'; document.getElementById('txt').focus(); }
+        else if(act=='forward') promptModal("Forward", "Username:", u=>{ if(u) req('send',{message:m.message,type:m.type,extra:m.extra_data,to_user:u}); });
+        else if(act=='copy') { if(m.type=='text') navigator.clipboard.writeText(m.message); }
+        else if(act=='pin') { let h=get(S.type,S.id); let t=h.find(x=>x.timestamp==m.timestamp); if(t){t.pinned=!t.pinned; save(S.type,S.id,h); renderChat();} }
+        else if(act=='details') alertModal("Details", `From: ${m.from_user}\nSent: ${new Date(m.timestamp*1000).toLocaleString()}`);
+        else if(act=='delete') { if(m.from_user!=ME)return; S.reply=m.timestamp; deleteMsg(); }
+    } else if(c.type == 'chat_list') {
+        let d = c.data;
+        if(act=='open') { openChat(d.type, d.id); switchTab(d.type=='dm'?'chats':'groups'); }
+        else if(act=='clear') { if(confirm("Clear history?")) { save(d.type, d.id, []); if(S.id==d.id) renderChat(); renderLists(); } }
+        else if(act=='del_chat') { if(confirm("Delete chat?")) { localStorage.removeItem(`mw_${d.type}_${d.id}`); if(S.id==d.id) closeChat(); renderLists(); } }
+    } else {
+        if(act=='theme') toggleTheme();
+        else if(act=='settings') switchTab('settings');
+        else if(act=='about') switchTab('about');
     }
 }
 
@@ -1146,10 +1137,12 @@ function deleteMsg(){
     removeMsg(S.type,S.id,S.reply); cancelReply();
 }
 
-function toggleMenu(){
+function toggleMenu(e){
+    if(e && e.target.closest('.menu-dropdown')) return;
     let m=document.getElementById('chat-menu');
+    let wasVisible = m.style.display=='block';
     toggleNotif(false);
-    m.style.display=m.style.display=='block'?'none':'block';
+    if(!wasVisible) m.style.display='block';
 }
 function clearChat(){
     if(!confirm("Clear history?")) return;
@@ -1269,9 +1262,14 @@ document.getElementById('txt').oninput=()=>{
     if(S.type=='dm' && Date.now()-lastTyping>2000){ lastTyping=Date.now(); req('typing',{to:S.id}); }
 };
 window.onclick=(e)=>{
-    if(!e.target.closest('.notif-btn'))toggleNotif(false);
+    if(!e.target.closest('.notif-btn') && !e.target.closest('.menu-btn'))toggleNotif(false);
     if(!e.target.closest('.menu-btn'))document.getElementById('chat-menu').style.display='none';
     if(!e.target.closest('.ctx-menu') && !e.target.closest('.msg')) document.getElementById('ctx-menu').style.display='none';
+};
+window.oncontextmenu = (e) => {
+    if(e.defaultPrevented) return;
+    if(e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
+    showContextMenu(e, 'app', null);
 };
 window.onfocus=()=>{ if(S.type=='dm'&&S.id) openChat('dm',S.id); };
 

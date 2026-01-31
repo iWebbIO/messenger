@@ -385,8 +385,8 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
     .panel-header { padding:20px; font-weight:bold; font-size:1.2rem; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
     .list-area { flex:1; overflow-y:auto; }
     .list-item { padding:15px; border-bottom:1px solid #252525; display:flex; align-items:center; cursor:pointer; transition:0.2s; }
-    .list-item:hover { background:rgba(255,255,255,0.05); }
-    .list-item.active { background:#333; }
+    .list-item:hover { background:rgba(255,255,255,0.1); }
+    .list-item.active { background:rgba(255,255,255,0.15); border-left:4px solid var(--accent); padding-left:11px; }
     .avatar { width:40px; height:40px; border-radius:50%; background:#444; margin-right:12px; display:flex; align-items:center; justify-content:center; font-weight:bold; background-size:cover; flex-shrink:0; }
     
     .main-view { flex:1; display:flex; flex-direction:column; background:#0a0a0a; background-image:radial-gradient(#222 1px, transparent 1px); background-size:20px 20px; position:relative; }
@@ -425,8 +425,8 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
     input[type=text] { width:100%; padding:12px; border-radius:20px; border:none; background:#333; color:#fff; outline:none; box-sizing:border-box; }
     
     #btn-e2ee svg { fill: var(--accent); }
-    .btn-icon { background:none; border:none; color:#888; cursor:pointer; display:flex; align-items:center; justify-content:center; }
-    .btn-icon:hover { color:#fff; }
+    .btn-icon { background:none; border:none; color:#888; cursor:pointer; display:flex; align-items:center; justify-content:center; border-radius:50%; transition:0.2s; }
+    .btn-icon:hover { color:#fff; background:rgba(255,255,255,0.1); }
     .btn-primary { background:var(--accent); color:#fff; border:none; padding:8px 16px; border-radius:20px; cursor:pointer; font-weight:bold; }
     
     .settings-panel { padding:20px; text-align:center; }
@@ -544,8 +544,8 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
     <!-- LIST PANEL -->
     <div class="nav-panel" id="nav-panel">
         <div id="tab-chats" class="tab-content">
-            <div class="panel-header">Chats <div class="btn-icon" onclick="promptChat()">+</div></div>
-            <div style="padding:10px;border-bottom:1px solid var(--border)"><input type="text" id="chat-search" class="form-input" placeholder="Search chats..." onkeyup="renderLists()" style="padding:8px;border-radius:15px"></div>
+            <div style="padding:20px 15px 5px 15px"><input type="text" id="chat-search" class="form-input" placeholder="Search chats..." onkeyup="renderLists()" style="margin:0;padding:10px 15px;border-radius:20px"></div>
+        <div class="panel-header" style="padding-top:5px;padding-bottom:5px;border-bottom:none">Chats <div class="btn-icon" onclick="promptChat()" style="width:32px;height:32px">+</div></div>
             <div class="list-area" id="list-chats"></div>
         </div>
         <div id="tab-groups" class="tab-content" style="display:none">
@@ -1013,6 +1013,7 @@ async function renderLists(){
 async function openChat(t,i){
     if(S.id!=i) lastRead=0;
     S.type=t; S.id=i;
+    renderLists();
     renderChat(); scrollToBottom(true);
     document.getElementById('input-box').style.visibility='visible';
     document.getElementById('main-view').classList.add('active');

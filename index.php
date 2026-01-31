@@ -657,6 +657,28 @@ let lastRead = 0;
 let mediaRec=null, audChunks=[];
 let S = { tab:'chats', id:null, type:null, reply:null, ctx:null, dms:{}, groups:{}, online:[], notifs:[], keys:{pub:null,priv:null}, e2ee:{} };
 
+// --- INDEXEDDB HELPERS ---
+const DB_NAME = 'mw_chat_db';
+const DB_STORE = 'chats';
+let dbPromise = new Promise((resolve, reject) => {
+    let req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = e => e.target.result.createObjectStore(DB_STORE);
+    req.onsuccess = e => resolve(e.target.result);
+    req.onerror = e => reject(e);
+});
+async function dbOp(mode, fn) {
+    try {
+        let db = await dbPromise; 
+        return new Promise((res, rej) => { 
+            let tx = db.transaction(DB_STORE, mode); 
+            let req = fn(tx.objectStore(DB_STORE)); 
+            tx.oncomplete = () => { if(mode==='readwrite') res(req ? req.result : null); }; 
+            tx.onerror = () => rej(tx.error); 
+            if(mode==='readonly') { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error); }
+        });
+    } catch(e) { console.error("DB Error", e); return mode==='readonly' ? [] : null; }
+}
+
 // --- MODAL UTILS ---
 function showModal(title, type, placeholder, callback) {
     const ov = document.getElementById('app-modal');
@@ -706,6 +728,7 @@ function confirmModal(t, m, cb) { showModal(t, 'confirm', m, cb); }
 
 // --- INIT ---
 async function loadKeys() {
+    if(!window.crypto || !window.crypto.subtle) return;
     let pub = localStorage.getItem('mw_key_pub');
     let priv = localStorage.getItem('mw_key_priv');
     if (pub && priv) {
@@ -726,6 +749,7 @@ async function saveSession(u, k) {
 }
 
 async function loadSessions() {
+    if(!window.crypto || !window.crypto.subtle) return;
     for (let i = 0; i < localStorage.length; i++) {
         let k = localStorage.key(i);
         if (k.startsWith('mw_sess_')) {
@@ -736,10 +760,25 @@ async function loadSessions() {
 }
 
 async function init(){
-    await loadKeys();
-    await loadSessions();
-    if(localStorage.getItem('mw_theme')=='light') document.body.classList.add('light-mode');
-    pollLoop();
+    try {
+        await loadKeys();
+        await loadSessions();
+        // Migration from LocalStorage to IndexedDB
+        if(!localStorage.getItem('mw_migrated_v1')){
+            try {
+                let keys = Object.keys(localStorage);
+                for(let k of keys){
+                    if(k.startsWith('mw_dm_') || k.startsWith('mw_group_') || k.startsWith('mw_public_')){
+                        await dbOp('readwrite', s => s.put(JSON.parse(localStorage.getItem(k)), k));
+                        localStorage.removeItem(k);
+                    }
+                }
+                localStorage.setItem('mw_migrated_v1', '1');
+            } catch(e){ console.error("Migration error", e); }
+        }
+        if(localStorage.getItem('mw_theme')=='light') document.body.classList.add('light-mode');
+        pollLoop();
+    } catch(e) { console.error("Init failed", e); alert("App failed to initialize: " + e.message); }
 }
 
 async function req(act, data) {
@@ -759,7 +798,7 @@ async function pollLoop() {
 async function poll(){
     try {
         let lastPub = 0;
-        let pubH = get('public', 'global');
+        let pubH = await get('public', 'global');
         if(pubH.length) lastPub = pubH[pubH.length-1].id || 0;
         let r=await req('poll', {last_pub: lastPub});
         let d=await r.json();
@@ -770,43 +809,43 @@ async function poll(){
             document.getElementById('set-bio').value=d.profile.bio||'';
             document.getElementById('my-date').innerText="Joined: "+new Date(d.profile.joined_at*1000).toLocaleDateString();
         }
-        d.dms.forEach(async m=>{
-            if(m.type=='signal_req'){ handleSignalReq(m); return; }
-            if(m.type=='signal_ack'){ handleSignalAck(m); return; }
-            if(m.type=='delete'){ removeMsg('dm',m.from_user,m.extra_data); return; }
+        for(let m of d.dms){
+            if(m.type=='signal_req'){ handleSignalReq(m); continue; }
+            if(m.type=='signal_ack'){ handleSignalAck(m); continue; }
+            if(m.type=='delete'){ await removeMsg('dm',m.from_user,m.extra_data); continue; }
             if(m.type=='read'){ 
-                let h=get('dm',m.from_user); 
+                let h=await get('dm',m.from_user); 
                 h.forEach(x=>{if(x.from_user==ME && x.timestamp<=m.extra_data)x.read=true}); 
-                save('dm',m.from_user,h); if(S.id==m.from_user)renderChat(); 
-                return; 
+                await save('dm',m.from_user,h); if(S.id==m.from_user) renderChat(); 
+                continue; 
             }
             if(m.type=='enc'){ try{m.message=await dec(m.from_user,m.message,m.extra_data)}catch(e){m.message="[Encrypted]"} }
-            store('dm',m.from_user,m);
+            await store('dm',m.from_user,m);
             let prev = m.type==='text' ? m.message : '['+m.type+']';
             notify(m.from_user, prev, 'dm');
             if(S.type=='dm' && S.id==m.from_user && document.hasFocus()) req('send', {to_user:m.from_user, type:'read', extra:m.timestamp});
-        });
-        S.groups={}; d.groups.forEach(g=>{ S.groups[g.id]=g; if(!get('group',g.id)) save('group',g.id,[]); });
-        d.group_msgs.forEach(m=>{ 
-            if(m.type=='delete'){ removeMsg('group',m.group_id,m.extra_data); return; }
-            store('group',m.group_id,m); 
+        }
+        S.groups={}; for(let g of d.groups){ S.groups[g.id]=g; let ex=await get('group',g.id); if(!ex.length) await save('group',g.id,[]); }
+        for(let m of d.group_msgs){ 
+            if(m.type=='delete'){ await removeMsg('group',m.group_id,m.extra_data); continue; }
+            await store('group',m.group_id,m); 
             let prev = m.type==='text' ? m.message : '['+m.type+']';
             notify(m.group_id, prev, 'group'); 
-        });
-        d.public_msgs.forEach(m=>{
-            store('public','global',m);
+        }
+        for(let m of d.public_msgs){
+            await store('public','global',m);
             if(S.tab!='public') notify('global', m.message, 'public');
-        });
+        }
         if(S.type=='dm' && d.typing && d.typing.includes(S.id)) document.getElementById('typing-ind').style.display='block'; else document.getElementById('typing-ind').style.display='none';
 
-        renderLists();
+        await renderLists();
         if(S.type=='dm' && S.id){
              let ou=d.online.find(x=>x.username==S.id);
              let sub=ou?(ou.bio||'Online'):'Offline';
              document.getElementById('chat-sub').innerText=sub;
              if(ou && ou.avatar) document.getElementById('chat-av').style.backgroundImage=`url('${ou.avatar}')`;
         }
-    } catch(e){}
+} catch(e){ console.error("Poll error:", e); }
 }
 
 function notify(id, text, type) {
@@ -854,25 +893,25 @@ function toggleNotif(force) {
     if(force === false) el.style.display='none'; else el.style.display = (el.style.display=='block'?'none':'block');
 }
 
-function get(t,i){ let k=`mw_${t}_${i}`; return JSON.parse(localStorage.getItem(k))||[]; }
-function save(t,i,d){ try{ localStorage.setItem(`mw_${t}_${i}`,JSON.stringify(d)); }catch(e){ alertModal('Error','Storage full! Clear some chats.'); } }
-function store(t,i,m){
-    let h=get(t,i);
+async function get(t,i){ return (await dbOp('readonly', s => s.get(`mw_${t}_${i}`))) || []; }
+async function save(t,i,d){ try { await dbOp('readwrite', s => s.put(d, `mw_${t}_${i}`)); } catch(e){ console.error("Save failed", e); } }
+async function store(t,i,m){
+    let h = await get(t,i);
     let idx = h.findIndex(x=>x.timestamp==m.timestamp && x.message==m.message);
     if(idx !== -1) {
         if(!m.pending && h[idx].pending) {
             h[idx] = m;
-            save(t,i,h);
+            await save(t,i,h);
             if(S.id==i && S.type==t) renderChat();
         }
         return;
     }
     if(m.type=='react'){
         let tg=h.find(x=>x.timestamp==m.extra_data);
-        if(tg){ if(!tg.reacts)tg.reacts={}; tg.reacts[m.from_user]=m.message; save(t,i,h); if(S.id==i && S.type==t) renderChat(); }
+        if(tg){ if(!tg.reacts)tg.reacts={}; tg.reacts[m.from_user]=m.message; await save(t,i,h); if(S.id==i && S.type==t) renderChat(); }
         return;
     }
-    h.push(m); save(t,i,h);
+    h.push(m); await save(t,i,h);
     if(S.id==i && S.type==t) {
         let prev = h.length>1 ? h[h.length-2] : null;
         let show = (t=='public'||t=='group') && m.from_user!=ME && (!prev || prev.from_user!=m.from_user);
@@ -880,13 +919,14 @@ function store(t,i,m){
         scrollToBottom(false);
     }
 }
-function removeMsg(t,i,ts){
-    let h=get(t,i);
+async function removeMsg(t,i,ts){
+    let h = await get(t,i);
     let idx=h.findIndex(x=>x.timestamp==ts);
-    if(idx!=-1){ h.splice(idx,1); save(t,i,h); if(S.id==i && S.type==t) renderChat(); }
+    if(idx!=-1){ h.splice(idx,1); await save(t,i,h); if(S.id==i && S.type==t) renderChat(); }
 }
 
 async function startE2EE(){
+    if(!window.crypto || !window.crypto.subtle) { alertModal('Error', 'Encryption requires HTTPS'); return; }
     if(S.type!='dm'||S.e2ee[S.id])return;
     let exp=await window.crypto.subtle.exportKey("jwk",S.keys.pub);
     req('send', {to_user:S.id,message:JSON.stringify(exp),type:'signal_req'});
@@ -935,40 +975,42 @@ function switchTab(t){
     document.getElementById('main-view').classList.remove('active');
 }
 
-function renderLists(){
-    let dh='';
-    let filter = document.getElementById('chat-search').value.toLowerCase();
-    Object.keys(localStorage).forEach(k=>{
-        if(k.startsWith('mw_dm_')){
-            let u=k.split('mw_dm_')[1];
-            if(filter && !u.toLowerCase().includes(filter)) return;
-            let h=JSON.parse(localStorage.getItem(k));
-            let sec=S.e2ee[u]?' e2ee-on':'';
-            let last=h.length?h[h.length-1].message:'Start chatting';
-            if(last.length>30)last=last.substring(0,30)+'...';
-            let ou=S.online.find(x=>x.username==u);
-            let av=ou?ou.avatar:'';
-            dh+=`<div class="list-item ${S.id==u?'active':''}" onclick="openChat('dm','${u}')" oncontextmenu="onChatListContext(event, 'dm', '${u}')">
-                <div class="avatar" style="background-image:url('${av}')">${av?'':u[0].toUpperCase()}</div>
-                <div style="flex:1"><div style="font-weight:bold">${u} ${ou?'<span style="color:#0f0;font-size:0.8em">●</span>':''}</div><div style="font-size:0.8em;color:#888">${last}</div></div>
-                <div class="btn-icon${sec}"><svg viewBox="0 0 24 24" width="16"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-9-2c0-1.66 1.34-3 3-3s3 1.34 3 3v2H9V6zm9 14H6V10h12v10zm-6-3c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2z"/></svg></div></div>`;
+async function renderLists(){
+    try {
+        let dh='';
+        let filter = document.getElementById('chat-search').value.toLowerCase();
+        let keys = (await dbOp('readonly', s => s.getAllKeys())) || [];
+        for(let k of keys){
+            if(k.startsWith('mw_dm_')){
+                let u=k.split('mw_dm_')[1];
+                if(filter && !u.toLowerCase().includes(filter)) continue;
+                let h = await get('dm', u);
+                let sec=S.e2ee[u]?' e2ee-on':'';
+                let last=h.length?h[h.length-1].message:'Start chatting';
+                if(last.length>30)last=last.substring(0,30)+'...';
+                let ou=S.online.find(x=>x.username==u);
+                let av=ou?ou.avatar:'';
+                dh+=`<div class="list-item ${S.id==u?'active':''}" onclick="openChat('dm','${u}')" oncontextmenu="onChatListContext(event, 'dm', '${u}')">
+                    <div class="avatar" style="background-image:url('${av}')">${av?'':u[0].toUpperCase()}</div>
+                    <div style="flex:1"><div style="font-weight:bold">${u} ${ou?'<span style="color:#0f0;font-size:0.8em">●</span>':''}</div><div style="font-size:0.8em;color:#888">${last}</div></div>
+                    <div class="btn-icon${sec}"><svg viewBox="0 0 24 24" width="16"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-9-2c0-1.66 1.34-3 3-3s3 1.34 3 3v2H9V6zm9 14H6V10h12v10zm-6-3c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2z"/></svg></div></div>`;
+            }
         }
-    });
-    document.getElementById('list-chats').innerHTML=dh;
-    let gh='';
-    Object.values(S.groups).forEach(g=>{
-        if(filter && !g.name.toLowerCase().includes(filter)) return;
-        gh+=`<div class="list-item ${S.id==g.id?'active':''}" onclick="openChat('group',${g.id})" oncontextmenu="onChatListContext(event, 'group', ${g.id})">
-            <div class="avatar">#</div>
-            <div><div style="font-weight:bold">${g.name}</div><div style="font-size:0.8em;color:#888">${g.type}</div></div>
-        </div>`;
-    });
-    document.getElementById('list-groups').innerHTML=gh;
-
-    document.getElementById('online-count').innerText=S.online.length;
+        document.getElementById('list-chats').innerHTML=dh;
+        let gh='';
+        Object.values(S.groups).forEach(g=>{
+            if(filter && !g.name.toLowerCase().includes(filter)) return;
+            gh+=`<div class="list-item ${S.id==g.id?'active':''}" onclick="openChat('group',${g.id})" oncontextmenu="onChatListContext(event, 'group', ${g.id})">
+                <div class="avatar">#</div>
+                <div><div style="font-weight:bold">${g.name}</div><div style="font-size:0.8em;color:#888">${g.type}</div></div>
+            </div>`;
+        });
+        document.getElementById('list-groups').innerHTML=gh;
+        document.getElementById('online-count').innerText=S.online.length;
+    } catch(e) { console.error("RenderLists error", e); }
 }
 
-function openChat(t,i){
+async function openChat(t,i){
     if(S.id!=i) lastRead=0;
     S.type=t; S.id=i;
     renderChat(); scrollToBottom(true);
@@ -994,7 +1036,7 @@ function openChat(t,i){
     document.getElementById('chat-sub').innerText=sub;
     document.getElementById('txt').placeholder = (t=='dm' && S.e2ee[S.id]) ? "Type an encrypted message..." : "Type a message...";
     
-    if(t=='dm'){ let h=get('dm',i); let last=h.filter(x=>x.from_user==i).pop(); if(last && last.timestamp>lastRead){ lastRead=last.timestamp; req('send',{to_user:i,type:'read',extra:last.timestamp}); } }
+    if(t=='dm'){ let h=await get('dm',i); let last=h.filter(x=>x.from_user==i).pop(); if(last && last.timestamp>lastRead){ lastRead=last.timestamp; req('send',{to_user:i,type:'read',extra:last.timestamp}); } }
 }
 
 function createMsgNode(m, showSender){
@@ -1035,9 +1077,9 @@ function createMsgNode(m, showSender){
     return div;
 }
 
-function renderChat(){
+async function renderChat(){
     let c=document.getElementById('msgs'); c.innerHTML='';
-    let h=get(S.type,S.id);
+    let h = await get(S.type,S.id);
     let last=null;
     h.forEach(m=>{
         let show=(S.type=='public'||S.type=='group') && m.from_user!=ME && m.from_user!=last;
@@ -1069,7 +1111,7 @@ async function send(){
         reply_to_id: S.reply,
         pending: true
     };
-    store(S.type, S.id, msgObj);
+    await store(S.type, S.id, msgObj);
     scrollToBottom(true);
 
     // Prepare Network Request
@@ -1084,9 +1126,9 @@ async function send(){
         let r = await req('send', load);
         let d = await r.json();
         if(d.status === 'success') {
-            let h = get(S.type, S.id);
+            let h = await get(S.type, S.id);
             let m = h.find(x => x.timestamp == ts && x.message == txt);
-            if(m) { delete m.pending; save(S.type, S.id, h); renderChat(); }
+            if(m) { delete m.pending; await save(S.type, S.id, h); renderChat(); }
         }
     } catch(e) { console.error(e); }
 }
@@ -1136,25 +1178,25 @@ function showContextMenu(e, type, data) {
 
 function onChatListContext(e, type, id) { showContextMenu(e, 'chat_list', {type, id}); }
 
-function ctxAction(act, arg) {
+async function ctxAction(act, arg) {
     document.getElementById('ctx-menu').style.display='none';
     let c = S.ctx;
     if(!c) return;
     
     if(c.type == 'message') {
         let m = c.data;
-        if(act=='react') sendReact(m.timestamp, arg);
+        if(act=='react') await sendReact(m.timestamp, arg);
         else if(act=='reply') { S.reply=m.timestamp; document.getElementById('reply-ui').style.display='flex'; document.getElementById('reply-txt').innerText="Replying to "+m.from_user; document.getElementById('del-btn').style.display='none'; document.getElementById('txt').focus(); }
         else if(act=='forward') promptModal("Forward", "Username:", u=>{ if(u) req('send',{message:m.message,type:m.type,extra:m.extra_data,to_user:u}); });
         else if(act=='copy') { if(m.type=='text') navigator.clipboard.writeText(m.message); }
-        else if(act=='pin') { let h=get(S.type,S.id); let t=h.find(x=>x.timestamp==m.timestamp); if(t){t.pinned=!t.pinned; save(S.type,S.id,h); renderChat();} }
+        else if(act=='pin') { let h=await get(S.type,S.id); let t=h.find(x=>x.timestamp==m.timestamp); if(t){t.pinned=!t.pinned; await save(S.type,S.id,h); renderChat();} }
         else if(act=='details') alertModal("Details", `From: ${m.from_user}\nSent: ${new Date(m.timestamp*1000).toLocaleString()}`);
-        else if(act=='delete') { if(m.from_user!=ME)return; S.reply=m.timestamp; deleteMsg(); }
+        else if(act=='delete') { if(m.from_user!=ME)return; S.reply=m.timestamp; await deleteMsg(); }
     } else if(c.type == 'chat_list') {
         let d = c.data;
         if(act=='open') { openChat(d.type, d.id); switchTab(d.type=='dm'?'chats':'groups'); }
-        else if(act=='clear') { if(confirm("Clear history?")) { save(d.type, d.id, []); if(S.id==d.id) renderChat(); renderLists(); } }
-        else if(act=='del_chat') { if(confirm("Delete chat?")) { localStorage.removeItem(`mw_${d.type}_${d.id}`); if(S.id==d.id) closeChat(); renderLists(); } }
+        else if(act=='clear') { if(confirm("Clear history?")) { await save(d.type, d.id, []); if(S.id==d.id) renderChat(); renderLists(); } }
+        else if(act=='del_chat') { if(confirm("Delete chat?")) { await dbOp('readwrite', s=>s.delete(`mw_${d.type}_${d.id}`)); if(S.id==d.id) closeChat(); renderLists(); } }
     } else {
         if(act=='theme') toggleTheme();
         else if(act=='settings') switchTab('settings');
@@ -1162,21 +1204,21 @@ function ctxAction(act, arg) {
     }
 }
 
-function sendReact(ts,e){
+async function sendReact(ts,e){
     let ld={message:e,type:'react',extra:ts};
     if(S.type=='dm')ld.to_user=S.id; else if(S.type=='group') ld.group_id=S.id; else if(S.type=='public') ld.group_id=-1;
     req('send', ld);
-    let h=get(S.type,S.id);
+    let h = await get(S.type,S.id);
     let m=h.find(x=>x.timestamp==ts);
-    if(m){ if(!m.reacts)m.reacts={}; m.reacts[ME]=e; save(S.type,S.id,h); renderChat(); }
+    if(m){ if(!m.reacts)m.reacts={}; m.reacts[ME]=e; await save(S.type,S.id,h); renderChat(); }
 }
 
-function deleteMsg(){
+async function deleteMsg(){
     if(!S.reply)return;
     let ld={message:'DEL', type:'delete', extra:S.reply};
     if(S.type=='dm')ld.to_user=S.id; else if(S.type=='group') ld.group_id=S.id; else if(S.type=='public') ld.group_id=-1;
     req('send', ld);
-    removeMsg(S.type,S.id,S.reply); cancelReply();
+    await removeMsg(S.type,S.id,S.reply); cancelReply();
 }
 
 function toggleMenu(e){
@@ -1186,21 +1228,21 @@ function toggleMenu(e){
     toggleNotif(false);
     if(!wasVisible) m.style.display='block';
 }
-function clearChat(){
+async function clearChat(){
     if(!confirm("Clear history?")) return;
-    save(S.type, S.id, []); renderChat(); toggleMenu();
+    await save(S.type, S.id, []); renderChat(); toggleMenu();
 }
-function exportChat(){
-    let h = get(S.type, S.id);
+async function exportChat(){
+    let h = await get(S.type, S.id);
     let blob = new Blob([JSON.stringify(h, null, 2)], {type : 'application/json'});
     let a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = `chat_${S.type}_${S.id}.json`;
     a.click(); toggleMenu();
 }
-function deleteChat(){
+async function deleteChat(){
     if(!confirm("Delete chat permanently?")) return;
-    localStorage.removeItem(`mw_${S.type}_${S.id}`);
+    await dbOp('readwrite', s=>s.delete(`mw_${S.type}_${S.id}`));
     closeChat(); switchTab('chats'); toggleMenu();
 }
 function toggleTheme(){
@@ -1226,12 +1268,28 @@ function enableNotifs(){
     });
 }
 
-function uploadFile(inp){
+async function uploadFile(inp){
     let f=inp.files[0]; if(!f)return;
-    if(f.size > 10485760) { alertModal('Error','File too large (Max 10MB)'); return; }
     
+    // Compress Image
+    let fileToSend = f;
+    let dataUrl = null;
+    if(f.type.startsWith('image/') && f.type !== 'image/gif'){
+        try {
+            let img = await new Promise((res,rej)=>{let i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=URL.createObjectURL(f);});
+            let cvs = document.createElement('canvas');
+            let w=img.width, h=img.height, max=1600;
+            if(w>max||h>max){ if(w>h){h*=max/w;w=max;}else{w*=max/h;h=max;} }
+            cvs.width=w; cvs.height=h;
+            cvs.getContext('2d').drawImage(img,0,0,w,h);
+            dataUrl = cvs.toDataURL('image/jpeg', 0.8);
+            let blob = await new Promise(r=>cvs.toBlob(r,'image/jpeg',0.8));
+            fileToSend = new File([blob], f.name, {type:'image/jpeg'});
+        } catch(e){ console.log("Compression failed", e); }
+    }
+
     let fd = new FormData();
-    fd.append('file', f);
+    fd.append('file', fileToSend);
     let ts = Math.floor(Date.now()/1000);
     fd.append('timestamp', ts);
     if(S.type=='dm') fd.append('to_user', S.id);
@@ -1245,12 +1303,16 @@ function uploadFile(inp){
     });
     
     // Optimistic render (read locally)
-    let r = new FileReader();
-    r.onload = () => {
-        let type = f.type.startsWith('image/') ? 'image' : 'file';
-        store(S.type,S.id,{from_user:ME,message:r.result,type:type,timestamp:ts,extra_data:f.name});
-    };
-    r.readAsDataURL(f);
+    if(dataUrl) {
+        await store(S.type,S.id,{from_user:ME,message:dataUrl,type:'image',timestamp:ts,extra_data:f.name});
+    } else {
+        let r = new FileReader();
+        r.onload = async () => {
+            let type = f.type.startsWith('image/') ? 'image' : 'file';
+            await store(S.type,S.id,{from_user:ME,message:r.result,type:type,timestamp:ts,extra_data:f.name});
+        };
+        r.readAsDataURL(f);
+    }
 }
 
 function downloadFile(data, name){
@@ -1258,7 +1320,7 @@ function downloadFile(data, name){
 }
 
 function cancelReply(){ S.reply=null; document.getElementById('reply-ui').style.display='none'; document.getElementById('del-btn').style.display='none'; }
-function promptChat(){ promptModal("New Chat", "Username:", (u)=>{ if(u){ if(!get('dm',u).length)save('dm',u,[]); openChat('dm',u); switchTab('chats'); }}); }
+function promptChat(){ promptModal("New Chat", "Username:", async (u)=>{ if(u){ let ex=await get('dm',u); if(!ex.length) await save('dm',u,[]); openChat('dm',u); switchTab('chats'); }}); }
 function createGroup(){ promptModal("New Group", "Group Name:", (n)=>{ if(n)req('create_group',{name:n,type:'public'}); }); }
 function joinGroup(){ promptModal("Join Group", "6-Digit Code:", (c)=>{ if(c)req('join_group',{code:c}); }); }
 function saveSettings(){ req('update_profile',{bio:document.getElementById('set-bio').value,avatar:document.getElementById('set-av').value,new_password:document.getElementById('set-pw').value}); alertModal("Settings", "Profile updated."); }
@@ -1308,9 +1370,9 @@ function stopRec(send){
             if(b.size < 1000) { alertModal('Error','Recording too short'); return; }
             if(b.size > 10485760) { alertModal('Error','Audio too large'); return; }
             let r=new FileReader();
-            r.onload=()=>{ 
+            r.onload=async ()=>{ 
                 let ts=Math.floor(Date.now()/1000);
-                let ld={message:r.result,type:'audio',timestamp:ts}; if(S.type=='dm')ld.to_user=S.id; else if(S.type=='group') ld.group_id=S.id; else if(S.type=='public') ld.group_id=-1; req('send',ld); store(S.type,S.id,{from_user:ME,message:r.result,type:'audio',timestamp:ts}); 
+                let ld={message:r.result,type:'audio',timestamp:ts}; if(S.type=='dm')ld.to_user=S.id; else if(S.type=='group') ld.group_id=S.id; else if(S.type=='public') ld.group_id=-1; req('send',ld); await store(S.type,S.id,{from_user:ME,message:r.result,type:'audio',timestamp:ts}); 
             };
             r.readAsDataURL(b);
         }
@@ -1334,7 +1396,7 @@ window.oncontextmenu = (e) => {
 window.onfocus=()=>{ if(S.type=='dm'&&S.id) openChat('dm',S.id); };
 
 if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
-init();
+init().catch(e=>console.error(e));
 </script>
 </body>
 </html>

@@ -131,6 +131,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
+    if ($action === 'get_profile') {
+        $u = $_GET['u'] ?? '';
+        $stmt = $db->prepare("SELECT username, avatar, bio, joined_at, last_seen FROM users WHERE username = ?");
+        $stmt->execute([$u]);
+        echo json_encode($stmt->fetch() ?: ['status'=>'error']);
+        exit;
+    }
+
     // MESSAGING
     if ($action === 'send') {
         $ts = $input['timestamp'] ?? time();
@@ -146,6 +154,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else if (isset($input['group_id'])) {
             $stmt = $db->prepare("INSERT INTO messages (group_id, from_user, message, type, reply_to_id, extra_data, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)");
             $stmt->execute([$input['group_id'], $me, $msg, $type, $reply, $extra, $ts]);
+        }
+        echo json_encode(['status' => 'success']);
+        exit;
+    }
+
+    // AJAX UPLOAD
+    if ($action === 'upload_msg') {
+        if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
+            echo json_encode(['status'=>'error', 'message'=>'Upload failed']); exit;
+        }
+        
+        $mime = $_FILES['file']['type'];
+        $data = file_get_contents($_FILES['file']['tmp_name']);
+        $b64 = 'data:' . $mime . ';base64,' . base64_encode($data);
+        
+        $msg = $b64;
+        $type = strpos($mime, 'image') === 0 ? 'image' : 'file';
+        $extra = $_FILES['file']['name'];
+        $ts = $_POST['timestamp'] ?? time();
+        $reply = $_POST['reply_to'] ?? null;
+        
+        if (!empty($_POST['to_user'])) {
+            $stmt = $db->prepare("INSERT INTO messages (from_user, to_user, message, type, reply_to_id, extra_data, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)");
+            $stmt->execute([$me, $_POST['to_user'], $msg, $type, $reply, $extra, $ts]);
+        } else if (!empty($_POST['group_id'])) {
+            $stmt = $db->prepare("INSERT INTO messages (group_id, from_user, message, type, reply_to_id, extra_data, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)");
+            $stmt->execute([$_POST['group_id'], $me, $msg, $type, $reply, $extra, $ts]);
         }
         echo json_encode(['status' => 'success']);
         exit;
@@ -297,6 +332,7 @@ async function sub(){
     .light-mode input { background:#fff; border:1px solid #ccc; color:#000; }
     .light-mode .msg-meta { color:#777; }
     .light-mode .reply-ctx { background:#eee; color:#333; }
+    .light-mode .ctx-menu { background:#fff; border-color:#ccc; }
 
     .e2ee-on { color: #00a884; }
     body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; background:var(--bg); color:var(--text); height:100vh; display:flex; overflow:hidden; }
@@ -321,6 +357,7 @@ async function sub(){
     .main-view { flex:1; display:flex; flex-direction:column; background:#0a0a0a; background-image:radial-gradient(#222 1px, transparent 1px); background-size:20px 20px; position:relative; }
     .chat-header { height:60px; background:var(--panel); border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; padding:0 20px; }
     .header-actions { display:flex; gap:15px; position:relative; }
+    .chat-info-clickable { cursor: pointer; }
     
     .notif-btn { position:relative; cursor:pointer; color:#bbb; }
     .notif-badge { position:absolute; top:-5px; right:-5px; background:#f44; color:#fff; font-size:0.6rem; padding:1px 4px; border-radius:8px; display:none; }
@@ -331,11 +368,12 @@ async function sub(){
     .menu-btn { cursor:pointer; color:#bbb; position:relative; }
     .menu-dropdown { position:absolute; top:35px; right:0; background:#252525; border:1px solid #444; border-radius:8px; display:none; z-index:101; width:160px; box-shadow:0 5px 15px rgba(0,0,0,0.5); }
     .menu-item { padding:12px; border-bottom:1px solid #333; font-size:0.9rem; cursor:pointer; display:block; color:#eee; }
-    .menu-item:hover { background:#333; }
+    .menu-item:hover { background:rgba(255,255,255,0.1); }
+    .red-text { color: #ff5555; }
 
     .messages { flex:1; overflow-y:auto; padding:20px; display:flex; flex-direction:column; gap:5px; }
     .msg { max-width:65%; padding:8px 12px; border-radius:8px; font-size:0.95rem; line-height:1.4; position:relative; word-wrap:break-word; }
-    .msg.in { align-self:flex-start; background:var(--msg-in); border-top-left-radius:0; }
+    .msg.in { align-self:flex-start; background:var(--msg-in); border-top-left-radius:0; border:1px solid transparent; }
     .msg.out { align-self:flex-end; background:var(--msg-out); border-top-right-radius:0; }
     .msg img { max-width:100%; border-radius:4px; margin-top:5px; cursor:pointer; }
     .msg audio { max-width:250px; margin-top:5px; }
@@ -343,6 +381,7 @@ async function sub(){
     .file-att:hover { background:rgba(0,0,0,0.3); }
     .msg-sender { font-size:0.75rem; font-weight:bold; color:var(--accent); margin-bottom:4px; cursor:pointer; }
     .msg-meta { font-size:0.7rem; color:rgba(255,255,255,0.5); text-align:right; margin-top:2px; }
+    .msg.pinned { border: 1px solid var(--accent); }
     .reaction-bar { position:absolute; bottom:-12px; right:0; background:#222; border-radius:10px; padding:2px 6px; font-size:0.8rem; box-shadow:0 2px 5px rgba(0,0,0,0.5); cursor:pointer; }
     
     .input-area { padding:15px; background:var(--panel); display:flex; gap:10px; align-items:center; border-top:1px solid var(--border); }
@@ -369,6 +408,15 @@ async function sub(){
     .btn-modal { padding:8px 16px; border-radius:6px; cursor:pointer; border:none; font-weight:bold; }
     .btn-sec { background:transparent; color:#aaa; border:1px solid #444; }
     .btn-pri { background:var(--accent); color:#fff; }
+
+    /* Context Menu */
+    .ctx-menu { position:fixed; background:var(--panel); border:1px solid var(--border); border-radius:8px; box-shadow:0 5px 20px rgba(0,0,0,0.5); z-index:2000; min-width:180px; overflow:hidden; font-size:0.9rem; }
+    .ctx-reactions { display:flex; padding:8px; gap:5px; background:rgba(0,0,0,0.2); justify-content:space-around; }
+    .ctx-reaction { cursor:pointer; transition:0.2s; font-size:1.2rem; padding:2px; border-radius:4px; }
+    .ctx-reaction:hover { background:rgba(255,255,255,0.2); transform:scale(1.2); }
+    .ctx-item { padding:10px 15px; cursor:pointer; display:flex; align-items:center; gap:10px; }
+    .ctx-item:hover { background:rgba(255,255,255,0.05); }
+    .ctx-separator { height:1px; background:var(--border); margin:2px 0; }
 
     @media (max-width: 768px) {
         .app-container { flex-direction: column; }
@@ -426,6 +474,24 @@ async function sub(){
     </div>
 </div>
 
+<!-- CONTEXT MENU -->
+<div id="ctx-menu" class="ctx-menu" style="display:none">
+    <div class="ctx-reactions">
+        <span class="ctx-reaction" onclick="ctxReact('❤️')">❤️</span>
+        <span class="ctx-reaction" onclick="ctxReact('😂')">😂</span>
+        <span class="ctx-reaction" onclick="ctxReact('😮')">😮</span>
+        <span class="ctx-reaction" onclick="ctxReact('😢')">😢</span>
+        <span class="ctx-reaction" onclick="ctxReact('👍')">👍</span>
+    </div>
+    <div class="ctx-item" onclick="ctxAction('reply')">Reply</div>
+    <div class="ctx-item" onclick="ctxAction('forward')">Forward</div>
+    <div class="ctx-item" onclick="ctxAction('copy')">Copy</div>
+    <div class="ctx-item" onclick="ctxAction('pin')">Pin Message</div>
+    <div class="ctx-item" onclick="ctxAction('details')">Details</div>
+    <div class="ctx-separator"></div>
+    <div class="ctx-item red-text" onclick="ctxAction('delete')">Delete</div>
+</div>
+
 <div class="app-container">
     <!-- NAVIGATION RAIL -->
     <div class="nav-rail">
@@ -457,6 +523,7 @@ async function sub(){
     <div class="nav-panel" id="nav-panel">
         <div id="tab-chats" class="tab-content">
             <div class="panel-header">Chats <div class="btn-icon" onclick="promptChat()">+</div></div>
+            <div style="padding:10px;border-bottom:1px solid var(--border)"><input type="text" id="chat-search" class="form-input" placeholder="Search chats..." onkeyup="renderLists()" style="padding:8px;border-radius:15px"></div>
             <div class="list-area" id="list-chats"></div>
         </div>
         <div id="tab-groups" class="tab-content" style="display:none">
@@ -503,9 +570,9 @@ async function sub(){
     <div class="main-view" id="main-view">
         <div class="chat-header">
             <div style="display:flex;align-items:center">
-                <div class="back-btn" onclick="closeChat()">&larr;</div>
-                <div class="avatar" id="chat-av"></div>
-                <div><div id="chat-title" style="font-weight:bold"></div><div id="chat-sub" style="font-size:0.75rem;color:#999"></div><div id="typing-ind" style="font-size:0.7rem;color:var(--accent);display:none;font-style:italic">typing...</div></div>
+                <div class="back-btn" onclick="closeChat()" style="cursor:pointer">&larr;</div>
+                <div class="avatar chat-info-clickable" id="chat-av" onclick="showProfilePopup()"></div>
+                <div class="chat-info-clickable" onclick="showProfilePopup()"><div id="chat-title" style="font-weight:bold"></div><div id="chat-sub" style="font-size:0.75rem;color:#999"></div><div id="typing-ind" style="font-size:0.7rem;color:var(--accent);display:none;font-style:italic">typing...</div></div>
             </div>
             
             <div class="header-actions">
@@ -521,8 +588,8 @@ async function sub(){
                     <svg viewBox="0 0 24 24" width="24" fill="currentColor"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
                     <div class="menu-dropdown" id="chat-menu">
                         <div class="menu-item" onclick="clearChat()">Clear History</div>
+                        <div class="menu-item red-text" onclick="deleteChat()">Delete Chat</div>
                         <div class="menu-item" onclick="exportChat()">Export Chat</div>
-                        <div class="menu-item" onclick="deleteChat()">Delete Chat</div>
                     </div>
                 </div>
             </div>
@@ -564,7 +631,7 @@ const CSRF_TOKEN = "<?php echo $_SESSION['csrf_token']; ?>";
 let lastTyping = 0;
 let lastRead = 0;
 let mediaRec=null, audChunks=[];
-let S = { tab:'chats', id:null, type:null, reply:null, dms:{}, groups:{}, online:[], notifs:[], keys:{pub:null,priv:null}, e2ee:{} };
+let S = { tab:'chats', id:null, type:null, reply:null, ctxMsg:null, dms:{}, groups:{}, online:[], notifs:[], keys:{pub:null,priv:null}, e2ee:{} };
 
 // --- MODAL UTILS ---
 function showModal(title, type, placeholder, callback) {
@@ -840,9 +907,11 @@ function switchTab(t){
 
 function renderLists(){
     let dh='';
+    let filter = document.getElementById('chat-search').value.toLowerCase();
     Object.keys(localStorage).forEach(k=>{
         if(k.startsWith('mw_dm_')){
             let u=k.split('mw_dm_')[1];
+            if(filter && !u.toLowerCase().includes(filter)) return;
             let h=JSON.parse(localStorage.getItem(k));
             let sec=S.e2ee[u]?' e2ee-on':'';
             let last=h.length?h[h.length-1].message:'Start chatting';
@@ -858,6 +927,7 @@ function renderLists(){
     document.getElementById('list-chats').innerHTML=dh;
     let gh='';
     Object.values(S.groups).forEach(g=>{
+        if(filter && !g.name.toLowerCase().includes(filter)) return;
         gh+=`<div class="list-item ${S.id==g.id?'active':''}" onclick="openChat('group',${g.id})">
             <div class="avatar">#</div>
             <div><div style="font-weight:bold">${g.name}</div><div style="font-size:0.8em;color:#888">${g.type}</div></div>
@@ -899,7 +969,7 @@ function openChat(t,i){
 
 function createMsgNode(m, showSender){
     let div=document.createElement('div');
-    div.className=`msg ${m.from_user==ME?'out':'in'}`;
+    div.className=`msg ${m.from_user==ME?'out':'in'} ${m.pinned?'pinned':''}`;
     let sender='';
     if(showSender) sender=`<div class="msg-sender" onclick="if(ME!='${m.from_user}'){openChat('dm','${m.from_user}');switchTab('chats');}">${m.from_user}</div>`;
 
@@ -926,13 +996,12 @@ function createMsgNode(m, showSender){
     if(m.from_user==ME && S.type=='dm') stat = m.read ? '<span style="color:#4fc3f7;margin-left:3px">✓✓</span>' : '<span style="margin-left:3px">✓</span>';
     if(m.pending) stat = '<span style="color:#888;margin-left:3px">🕒</span>';
     div.innerHTML=`${sender}${rep}${txt}<div class="msg-meta">${new Date(m.timestamp*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})} ${stat}</div>${reacts}`;
+    
     div.oncontextmenu=(e)=>{
-        e.preventDefault(); S.reply=m.timestamp; 
-        document.getElementById('reply-ui').style.display='flex'; 
-        document.getElementById('reply-txt').innerText=m.from_user==ME?"Manage Message":"Replying...";
-        document.getElementById('del-btn').style.display=m.from_user==ME?'inline-block':'none';
+        e.preventDefault();
+        showContextMenu(e, m);
     };
-    div.ondblclick=()=>{ promptModal('Reaction', 'Enter emoji:', (e) => { if(e) sendReact(m.timestamp,e); }); };
+    div.ondblclick=()=>{ sendReact(m.timestamp, '❤️'); };
     return div;
 }
 
@@ -992,6 +1061,74 @@ async function send(){
     } catch(e) { console.error(e); }
 }
 
+// --- CONTEXT MENU ---
+function showContextMenu(e, m) {
+    S.ctxMsg = m;
+    let menu = document.getElementById('ctx-menu');
+    menu.style.display = 'block';
+    
+    // Position
+    let x = e.clientX;
+    let y = e.clientY;
+    if (x + 180 > window.innerWidth) x = window.innerWidth - 190;
+    if (y + 300 > window.innerHeight) y = window.innerHeight - 310;
+    
+    menu.style.left = x + 'px';
+    menu.style.top = y + 'px';
+}
+
+function ctxReact(emoji) {
+    if(S.ctxMsg) sendReact(S.ctxMsg.timestamp, emoji);
+    document.getElementById('ctx-menu').style.display='none';
+}
+
+function ctxAction(act) {
+    let m = S.ctxMsg;
+    let menu = document.getElementById('ctx-menu');
+    menu.style.display='none';
+    if(!m) return;
+
+    if(act === 'reply') {
+        S.reply = m.timestamp;
+        document.getElementById('reply-ui').style.display='flex';
+        document.getElementById('reply-txt').innerText = "Replying to " + m.from_user;
+        document.getElementById('del-btn').style.display='none';
+        document.getElementById('txt').focus();
+    }
+    else if(act === 'forward') {
+        promptModal("Forward", "Enter username to forward to:", (u) => {
+            if(u) {
+                // Simple forward implementation: send as new message
+                let load = { message: m.message, type: m.type, extra: m.extra_data };
+                req('send', {...load, to_user: u});
+                alertModal("Forward", "Message forwarded to " + u);
+            }
+        });
+    }
+    else if(act === 'copy') {
+        if(m.type === 'text') navigator.clipboard.writeText(m.message);
+        else alertModal("Info", "Can only copy text messages.");
+    }
+    else if(act === 'pin') {
+        let h = get(S.type, S.id);
+        let target = h.find(x => x.timestamp == m.timestamp);
+        if(target) {
+            target.pinned = !target.pinned;
+            save(S.type, S.id, h);
+            renderChat();
+        }
+    }
+    else if(act === 'details') {
+        let info = `From: ${m.from_user}\nTime: ${new Date(m.timestamp*1000).toLocaleString()}\nType: ${m.type}`;
+        alertModal("Message Details", info);
+    }
+    else if(act === 'delete') {
+        if(m.from_user !== ME) { alertModal("Error", "You can only delete your own messages."); return; }
+        S.reply = m.timestamp; // Hack to reuse deleteMsg logic
+        deleteMsg();
+    }
+}
+
 function sendReact(ts,e){
     let ld={message:e,type:'react',extra:ts};
     if(S.type=='dm')ld.to_user=S.id; else if(S.type=='group') ld.group_id=S.id; else if(S.type=='public') ld.group_id=-1;
@@ -1039,13 +1176,25 @@ function toggleTheme(){
 function uploadFile(inp){
     let f=inp.files[0]; if(!f)return;
     if(f.size > 10485760) { alertModal('Error','File too large (Max 10MB)'); return; }
-    let r=new FileReader();
-    r.onload=()=>{
-        let ts = Math.floor(Date.now()/1000);
+    
+    let fd = new FormData();
+    fd.append('file', f);
+    let ts = Math.floor(Date.now()/1000);
+    fd.append('timestamp', ts);
+    if(S.type=='dm') fd.append('to_user', S.id);
+    else if(S.type=='group') fd.append('group_id', S.id);
+    else fd.append('group_id', -1);
+
+    fetch('?action=upload_msg', { method:'POST', body:fd, headers:{'X-CSRF-Token': CSRF_TOKEN} })
+    .then(r=>r.json())
+    .then(d=>{
+        if(d.status!='success') alertModal('Error', d.message||'Upload failed');
+    });
+    
+    // Optimistic render (read locally)
+    let r = new FileReader();
+    r.onload = () => {
         let type = f.type.startsWith('image/') ? 'image' : 'file';
-        let ld={message:r.result,type:type,timestamp:ts,extra:f.name};
-        if(S.type=='dm')ld.to_user=S.id; else if(S.type=='group') ld.group_id=S.id; else if(S.type=='public') ld.group_id=-1;
-        req('send', ld);
         store(S.type,S.id,{from_user:ME,message:r.result,type:type,timestamp:ts,extra_data:f.name});
     };
     r.readAsDataURL(f);
@@ -1060,6 +1209,17 @@ function promptChat(){ promptModal("New Chat", "Username:", (u)=>{ if(u){ if(!ge
 function createGroup(){ promptModal("New Group", "Group Name:", (n)=>{ if(n)req('create_group',{name:n,type:'public'}); }); }
 function joinGroup(){ promptModal("Join Group", "6-Digit Code:", (c)=>{ if(c)req('join_group',{code:c}); }); }
 function saveSettings(){ req('update_profile',{bio:document.getElementById('set-bio').value,avatar:document.getElementById('set-av').value,new_password:document.getElementById('set-pw').value}); alertModal("Settings", "Profile updated."); }
+
+async function showProfilePopup() {
+    if(S.type !== 'dm') return;
+    let r = await fetch('?action=get_profile&u='+S.id);
+    let p = await r.json();
+    if(p.status === 'error') return;
+    
+    let info = `Username: ${p.username}\nBio: ${p.bio||'-'}\nJoined: ${new Date(p.joined_at*1000).toLocaleDateString()}\nLast Seen: ${new Date(p.last_seen*1000).toLocaleString()}`;
+    alertModal("Profile: " + p.username, info);
+}
+
 function scrollToBottom(force){ 
     let c=document.getElementById('msgs'); 
     if(force) { c.scrollTop=c.scrollHeight; return; }
@@ -1111,6 +1271,7 @@ document.getElementById('txt').oninput=()=>{
 window.onclick=(e)=>{
     if(!e.target.closest('.notif-btn'))toggleNotif(false);
     if(!e.target.closest('.menu-btn'))document.getElementById('chat-menu').style.display='none';
+    if(!e.target.closest('.ctx-menu') && !e.target.closest('.msg')) document.getElementById('ctx-menu').style.display='none';
 };
 window.onfocus=()=>{ if(S.type=='dm'&&S.id) openChat('dm',S.id); };
 

@@ -18,53 +18,74 @@ try {
     $db->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
     $db->exec("PRAGMA journal_mode=WAL;");
 
-    // Tables
-    $db->exec("CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE,
-        password TEXT,
-        avatar TEXT, 
-        joined_at INTEGER,
-        last_seen INTEGER
-    )");
+    // Schema Migration System
+    $ver = (int)$db->query("PRAGMA user_version")->fetchColumn();
+    
+    if ($ver < 1) {
+        // Base Schema
+        $db->exec("CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE,
+            password TEXT,
+            avatar TEXT, 
+            joined_at INTEGER,
+            last_seen INTEGER
+            , public_key TEXT
+        )");
 
-    $db->exec("CREATE TABLE IF NOT EXISTS groups (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT,
-        type TEXT,
-        owner_id INTEGER,
-        join_code TEXT,
-        created_at INTEGER
-    )");
+        $db->exec("CREATE TABLE IF NOT EXISTS groups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT,
+            type TEXT,
+            owner_id INTEGER,
+            join_code TEXT,
+            created_at INTEGER
+        )");
 
-    $db->exec("CREATE TABLE IF NOT EXISTS group_members (
-        group_id INTEGER,
-        user_id INTEGER,
-        last_received_id INTEGER DEFAULT 0,
-        PRIMARY KEY (group_id, user_id)
-    )");
+        $db->exec("CREATE TABLE IF NOT EXISTS group_members (
+            group_id INTEGER,
+            user_id INTEGER,
+            last_received_id INTEGER DEFAULT 0,
+            PRIMARY KEY (group_id, user_id)
+        )");
 
-    $db->exec("CREATE TABLE IF NOT EXISTS messages (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        group_id INTEGER DEFAULT NULL, 
-        from_user TEXT,
-        to_user TEXT,
-        message TEXT,
-        type TEXT DEFAULT 'text',
-        reply_to_id INTEGER,
-        extra_data TEXT,
-        timestamp INTEGER
-    )");
+        $db->exec("CREATE TABLE IF NOT EXISTS messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            group_id INTEGER DEFAULT NULL, 
+            from_user TEXT,
+            to_user TEXT,
+            message TEXT,
+            type TEXT DEFAULT 'text',
+            reply_to_id INTEGER,
+            extra_data TEXT,
+            timestamp INTEGER
+        )");
 
-    // Indexes for performance
-    $db->exec("CREATE INDEX IF NOT EXISTS idx_msg_to ON messages(to_user)");
-    $db->exec("CREATE INDEX IF NOT EXISTS idx_msg_group ON messages(group_id)");
-    $db->exec("CREATE INDEX IF NOT EXISTS idx_msg_ts ON messages(timestamp)");
+        $db->exec("CREATE INDEX IF NOT EXISTS idx_msg_to ON messages(to_user)");
+        $db->exec("CREATE INDEX IF NOT EXISTS idx_msg_group ON messages(group_id)");
+        $db->exec("CREATE INDEX IF NOT EXISTS idx_msg_ts ON messages(timestamp)");
 
-    // Updates for features
-    try { $db->exec("ALTER TABLE users ADD COLUMN typing_to TEXT"); } catch(Exception $e){}
-    try { $db->exec("ALTER TABLE users ADD COLUMN typing_at INTEGER"); } catch(Exception $e){}
-    try { $db->exec("ALTER TABLE users ADD COLUMN bio TEXT"); } catch(Exception $e){}
+        // Patch existing columns safely
+        $cols = $db->query("PRAGMA table_info(users)")->fetchAll(PDO::FETCH_COLUMN, 1);
+        if (!in_array('typing_to', $cols)) $db->exec("ALTER TABLE users ADD COLUMN typing_to TEXT");
+        if (!in_array('typing_at', $cols)) $db->exec("ALTER TABLE users ADD COLUMN typing_at INTEGER");
+        if (!in_array('bio', $cols)) $db->exec("ALTER TABLE users ADD COLUMN bio TEXT");
+
+        $db->exec("PRAGMA user_version = 1");
+        $ver = 1;
+    }
+
+    if ($ver < 2) {
+        $cols = $db->query("PRAGMA table_info(users)")->fetchAll(PDO::FETCH_COLUMN, 1);
+        if (!in_array('public_key', $cols)) $db->exec("ALTER TABLE users ADD COLUMN public_key TEXT");
+
+        $gcols = $db->query("PRAGMA table_info(groups)")->fetchAll(PDO::FETCH_COLUMN, 1);
+        if (!in_array('password', $gcols)) $db->exec("ALTER TABLE groups ADD COLUMN password TEXT");
+        if (!in_array('invite_expiry', $gcols)) $db->exec("ALTER TABLE groups ADD COLUMN invite_expiry INTEGER");
+        if (!in_array('join_enabled', $gcols)) $db->exec("ALTER TABLE groups ADD COLUMN join_enabled INTEGER DEFAULT 1");
+
+        $db->exec("PRAGMA user_version = 2");
+    }
 
 } catch (PDOException $e) { die("DB Error: " . $e->getMessage()); }
 
@@ -106,6 +127,32 @@ if ($action === 'get_profile') {
     $stmt = $db->prepare("SELECT username, avatar, bio, joined_at, last_seen FROM users WHERE username = ?");
     $stmt->execute([$u]);
     echo json_encode($stmt->fetch() ?: ['status'=>'error']);
+    exit;
+}
+if ($action === 'get_discoverable_groups') {
+    header('Content-Type: application/json');
+    $stmt = $db->query("SELECT id, name, type, join_code FROM groups WHERE type = 'discoverable' ORDER BY created_at DESC LIMIT 50");
+    echo json_encode(['status'=>'success', 'groups'=>$stmt->fetchAll()]);
+    exit;
+}
+if ($action === 'get_group_details') {
+    header('Content-Type: application/json');
+    if (!isset($_SESSION['user'])) { echo json_encode(['status'=>'error']); exit; }
+    $gid = $_GET['id'] ?? 0;
+    
+    // Check membership
+    $stmt = $db->prepare("SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?");
+    $stmt->execute([$gid, $_SESSION['uid']]);
+    if (!$stmt->fetch()) { echo json_encode(['status'=>'error', 'message'=>'Not a member']); exit; }
+
+    // Get Group Info
+    $stmt = $db->prepare("SELECT * FROM groups WHERE id = ?");
+    $stmt->execute([$gid]);
+    $group = $stmt->fetch();
+
+    $stmt = $db->prepare("SELECT u.id, u.username, u.avatar, u.last_seen, u.public_key FROM group_members gm JOIN users u ON gm.user_id = u.id WHERE gm.group_id = ?");
+    $stmt->execute([$gid]);
+    echo json_encode(['status'=>'success', 'group'=>$group, 'members'=>$stmt->fetchAll(), 'is_owner'=>($group['owner_id'] == $_SESSION['uid'])]);
     exit;
 }
 
@@ -166,6 +213,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         echo json_encode(['status' => 'success']);
         exit;
     }
+    if ($action === 'update_pubkey') {
+        $db->prepare("UPDATE users SET public_key = ? WHERE id = ?")->execute([$input['key'], $myId]);
+        echo json_encode(['status' => 'success']);
+        exit;
+    }
 
     // MESSAGING
     if ($action === 'send') {
@@ -216,22 +268,68 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // GROUPS
     if ($action === 'create_group') {
-        $code = ($input['type'] === 'public') ? rand(100000, 999999) : null;
-        $db->prepare("INSERT INTO groups (name, type, owner_id, join_code, created_at) VALUES (?, ?, ?, ?, ?)")
-           ->execute([htmlspecialchars($input['name']), $input['type'], $myId, $code, time()]);
-        $gid = $db->lastInsertId();
-        $db->prepare("INSERT INTO group_members (group_id, user_id) VALUES (?, ?)")->execute([$gid, $myId]);
-        echo json_encode(['status' => 'success']);
+        $type = $input['type'];
+        $code = ($type === 'public' || $type === 'discoverable') ? rand(100000, 999999) : null;
+        $joinEnabled = ($type === 'private') ? 0 : 1;
+        
+        try {
+            $db->prepare("INSERT INTO groups (name, type, owner_id, join_code, created_at, join_enabled) VALUES (?, ?, ?, ?, ?, ?)")
+               ->execute([htmlspecialchars($input['name']), $type, $myId, $code, time(), $joinEnabled]);
+            $gid = $db->lastInsertId();
+            $db->prepare("INSERT INTO group_members (group_id, user_id) VALUES (?, ?)")->execute([$gid, $myId]);
+            echo json_encode(['status' => 'success']);
+        } catch (Exception $e) { echo json_encode(['status'=>'error', 'message'=>$e->getMessage()]); }
+        exit;
+    }
+    if ($action === 'update_group_settings') {
+        $gid = $input['group_id'];
+        // Verify owner
+        $stmt = $db->prepare("SELECT owner_id FROM groups WHERE id = ?"); $stmt->execute([$gid]);
+        if ($stmt->fetchColumn() != $myId) { echo json_encode(['status'=>'error','message'=>'Not owner']); exit; }
+
+        if (isset($input['join_enabled'])) $db->prepare("UPDATE groups SET join_enabled = ? WHERE id = ?")->execute([$input['join_enabled'], $gid]);
+        
+        if (isset($input['generate_code'])) {
+            $suffix = strtoupper(substr($input['suffix'] ?? 'X', 0, 1));
+            if(!ctype_alpha($suffix)) $suffix = 'X';
+            $code = rand(10000, 99999) . $suffix;
+            $expiry = $input['expiry'] ? (time() + ($input['expiry'] * 60)) : null;
+            $pwd = $input['password'] ? password_hash($input['password'], PASSWORD_DEFAULT) : null;
+            
+            $db->prepare("UPDATE groups SET join_code = ?, password = ?, invite_expiry = ? WHERE id = ?")
+               ->execute([$code, $pwd, $expiry, $gid]);
+        }
+        echo json_encode(['status'=>'success']);
         exit;
     }
     if ($action === 'join_group') {
-        $row = $db->prepare("SELECT id FROM groups WHERE join_code = ?");
+        $row = $db->prepare("SELECT * FROM groups WHERE join_code = ?");
         $row->execute([$input['code']]);
         $grp = $row->fetch();
         if ($grp) {
+            if (!$grp['join_enabled']) { echo json_encode(['status'=>'error','message'=>'Joining disabled']); exit; }
+            if ($grp['invite_expiry'] && time() > $grp['invite_expiry']) { echo json_encode(['status'=>'error','message'=>'Code expired']); exit; }
+            if ($grp['password'] && !password_verify($input['password']??'', $grp['password'])) { echo json_encode(['status'=>'error','message'=>'Invalid password']); exit; }
             try { $db->prepare("INSERT INTO group_members (group_id, user_id) VALUES (?, ?)")->execute([$grp['id'], $myId]); 
             echo json_encode(['status' => 'success']); } catch(Exception $e) { echo json_encode(['status' => 'error', 'message'=>'Joined already']); }
         } else echo json_encode(['status' => 'error', 'message' => 'Invalid code']);
+        exit;
+    }
+    if ($action === 'leave_group') {
+        $db->prepare("DELETE FROM group_members WHERE group_id = ? AND user_id = ?")->execute([$input['group_id'], $myId]);
+        echo json_encode(['status' => 'success']);
+        exit;
+    }
+    if ($action === 'delete_group') {
+        $gid = $input['group_id'];
+        $stmt = $db->prepare("SELECT owner_id FROM groups WHERE id = ?");
+        $stmt->execute([$gid]);
+        if ($stmt->fetchColumn() == $myId) {
+            $db->prepare("DELETE FROM groups WHERE id = ?")->execute([$gid]);
+            $db->prepare("DELETE FROM group_members WHERE group_id = ?")->execute([$gid]);
+            $db->prepare("DELETE FROM messages WHERE group_id = ?")->execute([$gid]);
+            echo json_encode(['status' => 'success']);
+        } else echo json_encode(['status' => 'error', 'message' => 'Not owner']);
         exit;
     }
 
@@ -335,6 +433,7 @@ button{width:100%;padding:12px;background:#00a884;color:#fff;border:none;border-
 const CSRF_TOKEN = "<?php echo $_SESSION['csrf_token']; ?>";
 let reg=false;
 async function sub(){
+    let btn=document.querySelector('button');btn.disabled=true;btn.innerText='Processing...';
     let u=document.getElementById('u').value,p=document.getElementById('p').value;
     let r=await fetch('?action='+(reg?'register':'login'),{
         method:'POST',
@@ -342,7 +441,7 @@ async function sub(){
         body:JSON.stringify({username:u,password:p})
     });
     let d=await r.json();
-    if(d.status=='success')location.reload();else{let e=document.getElementById('err');e.innerText=d.message;e.style.display='block'}
+    if(d.status=='success')location.reload();else{let e=document.getElementById('err');e.innerText=d.message;e.style.display='block';btn.disabled=false;btn.innerText=reg?'Register':'Login';}
 }
 if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
 </script></body></html>
@@ -384,7 +483,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
     .nav-panel { width:280px; background:var(--panel); border-right:1px solid var(--border); display:flex; flex-direction:column; }
     .panel-header { padding:20px; font-weight:bold; font-size:1.2rem; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
     .list-area { flex:1; overflow-y:auto; }
-    .list-item { padding:15px; border-bottom:1px solid #252525; display:flex; align-items:center; cursor:pointer; transition:0.2s; }
+    .list-item { padding:15px; border-bottom:1px solid #252525; display:flex; align-items:center; cursor:pointer; transition:0.2s; position:relative; }
     .list-item:hover { background:rgba(255,255,255,0.1); }
     .list-item.active { background:rgba(255,255,255,0.15); border-left:4px solid var(--accent); padding-left:11px; }
     .avatar { width:40px; height:40px; border-radius:50%; background:#444; margin-right:12px; display:flex; align-items:center; justify-content:center; font-weight:bold; background-size:cover; flex-shrink:0; }
@@ -423,6 +522,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
     .input-wrapper { flex:1; position:relative; }
     .reply-ctx { background:#2a2a2a; padding:6px 10px; border-radius:5px 5px 0 0; font-size:0.8rem; color:#aaa; display:none; justify-content:space-between; }
     input[type=text] { width:100%; padding:12px; border-radius:20px; border:none; background:#333; color:#fff; outline:none; box-sizing:border-box; }
+    #txt { width:100%; padding:10px 12px; border-radius:20px; border:none; background:#333; color:#fff; outline:none; box-sizing:border-box; resize:none; height:40px; font-family:inherit; overflow-y:hidden; line-height:1.4; display:block; }
     
     #btn-e2ee svg { fill: var(--accent); }
     .btn-icon { background:none; border:none; color:#888; cursor:pointer; display:flex; align-items:center; justify-content:center; border-radius:50%; transition:0.2s; }
@@ -432,6 +532,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
     .settings-panel { padding:20px; text-align:center; }
     .form-group { margin-top:15px; text-align:left; }
     .form-input { width:100%; padding:10px; background:#333; border:1px solid #444; color:#fff; border-radius:4px; margin-top:5px; outline:none; box-sizing:border-box; }
+    .form-select { width:100%; padding:10px; background:#333; border:1px solid #444; color:#fff; border-radius:4px; margin-top:5px; outline:none; }
     .about-link { color: var(--accent); text-decoration:none; }
 
     /* Modal */
@@ -443,6 +544,10 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
     .btn-modal { padding:8px 16px; border-radius:6px; cursor:pointer; border:none; font-weight:bold; }
     .btn-sec { background:transparent; color:#aaa; border:1px solid #444; }
     .btn-pri { background:var(--accent); color:#fff; }
+    
+    /* WEncrypt Overlay */
+    .we-overlay { position:absolute; top:60px; left:0; width:100%; height:calc(100% - 60px); background:rgba(0,0,0,0.85); z-index:50; display:none; flex-direction:column; align-items:center; justify-content:center; text-align:center; }
+    .we-status { margin-top:20px; color:#00a884; font-size:1.2rem; }
 
     /* Context Menu */
     .ctx-menu { position:fixed; background:var(--panel); border:1px solid var(--border); border-radius:8px; box-shadow:0 5px 20px rgba(0,0,0,0.5); z-index:2000; min-width:180px; overflow:hidden; font-size:0.9rem; }
@@ -536,7 +641,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
         <div class="rail-btn" id="nav-settings" onclick="switchTab('settings')">
             <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L3.16 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
         </div>
-        <div class="rail-btn" onclick="location.href='?action=logout'" title="Logout">
+        <div class="rail-btn" onclick="if(confirm('Logout?'))location.href='?action=logout'" title="Logout">
             <svg viewBox="0 0 24 24"><path d="M10.09 15.59L11.5 17l5-5-5-5-1.41 1.41L12.67 11H3v2h9.67l-2.58 2.59zM19 3H5c-1.11 0-2 .9-2 2v4h2V5h14v14H5v-4H3v4c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg>
         </div>
     </div>
@@ -549,8 +654,13 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
             <div class="list-area" id="list-chats"></div>
         </div>
         <div id="tab-groups" class="tab-content" style="display:none">
-            <div class="panel-header">Groups <div class="btn-icon" onclick="createGroup()">+</div></div>
-            <div style="padding:10px"><button class="form-input" style="cursor:pointer" onclick="joinGroup()">Join via Code</button></div>
+            <div style="padding:20px 15px 5px 15px"><input type="text" id="group-search" class="form-input" placeholder="Search groups..." onkeyup="renderLists()" style="margin:0;padding:10px 15px;border-radius:20px"></div>
+            <div class="panel-header" style="padding-top:5px;padding-bottom:5px;border-bottom:none">Groups 
+                <div style="display:flex;gap:5px">
+                    <div class="btn-icon" onclick="discoverGroups()" title="Discover Groups" style="width:32px;height:32px">🌍</div>
+                    <div class="btn-icon" onclick="createGroup()" title="Create Group" style="width:32px;height:32px">+</div>
+                </div></div>
+            <div style="padding:0 15px 10px 15px"><button class="form-input" style="cursor:pointer;border-radius:20px;text-align:center;background:var(--bg);border:1px solid var(--border)" onclick="joinGroup()">Join via Code</button></div>
             <div class="list-area" id="list-groups"></div>
         </div>
         <div id="tab-public" class="tab-content" style="display:none;height:100%">
@@ -600,7 +710,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
             </div>
             
             <div class="header-actions">
-                <button class="btn-icon" id="btn-e2ee" onclick="startE2EE()" title="E2EE" style="display:none">
+                <button class="btn-icon" id="btn-e2ee" onclick="toggleEncryption()" title="Encryption" style="display:none">
                     <svg viewBox="0 0 24 24" width="20"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-9-2c0-1.66 1.34-3 3-3s3 1.34 3 3v2H9V6zm9 14H6V10h12v10zm-6-3c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2z"/></svg>
                 </button>
                 <div class="notif-btn" onclick="toggleNotif()">
@@ -617,6 +727,12 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
                     </div>
                 </div>
             </div>
+        </div>
+
+        <div id="we-overlay" class="we-overlay">
+            <svg viewBox="0 0 24 24" width="64" height="64" fill="#00a884"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-9-2c0-1.66 1.34-3 3-3s3 1.34 3 3v2H9V6zm9 14H6V10h12v10zm-6-3c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2z"/></svg>
+            <div class="we-status" id="we-status">Waiting for members...</div>
+            <div style="margin-top:10px;color:#888;font-size:0.9rem">Do not leave this screen.</div>
         </div>
 
         <div class="messages" id="msgs"></div>
@@ -640,7 +756,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
                     <span onclick="stopRec(false)" style="cursor:pointer;margin-right:15px;color:#ccc">&times;</span>
                     <span onclick="stopRec(true)" style="cursor:pointer;color:var(--accent)">&#10004;</span>
                 </div>
-                <input type="text" id="txt" placeholder="Type a message..." autocomplete="off">
+                <textarea id="txt" rows="1" placeholder="Type a message..."></textarea>
             </div>
             <button class="btn-icon" id="btn-send" style="color:var(--accent)" onclick="send()">
                 <svg viewBox="0 0 24 24" width="24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
@@ -655,14 +771,17 @@ const CSRF_TOKEN = "<?php echo $_SESSION['csrf_token']; ?>";
 let lastTyping = 0;
 let lastRead = 0;
 let mediaRec=null, audChunks=[];
-let S = { tab:'chats', id:null, type:null, reply:null, ctx:null, dms:{}, groups:{}, online:[], notifs:[], keys:{pub:null,priv:null}, e2ee:{} };
+let S = { tab:'chats', id:null, type:null, reply:null, ctx:null, dms:{}, groups:{}, online:[], notifs:[], keys:{pub:null,priv:null}, e2ee:{}, we:{active:false, ready:[]} };
 
 // --- INDEXEDDB HELPERS ---
 const DB_NAME = 'mw_chat_db';
 const DB_STORE = 'chats';
 let dbPromise = new Promise((resolve, reject) => {
     let req = indexedDB.open(DB_NAME, 1);
-    req.onupgradeneeded = e => e.target.result.createObjectStore(DB_STORE);
+    req.onupgradeneeded = e => {
+        let db = e.target.result;
+        if(!db.objectStoreNames.contains(DB_STORE)) db.createObjectStore(DB_STORE);
+    };
     req.onsuccess = e => resolve(e.target.result);
     req.onerror = e => reject(e);
 });
@@ -734,6 +853,7 @@ async function loadKeys() {
     if (pub && priv) {
         S.keys.pub = await window.crypto.subtle.importKey("jwk", JSON.parse(pub), {name:"ECDH",namedCurve:"P-256"}, true, []);
         S.keys.priv = await window.crypto.subtle.importKey("jwk", JSON.parse(priv), {name:"ECDH",namedCurve:"P-256"}, true, ["deriveKey"]);
+        req('update_pubkey', {key: JSON.stringify(await window.crypto.subtle.exportKey("jwk", S.keys.pub))});
     } else {
         let k = await window.crypto.subtle.generateKey({name:"ECDH",namedCurve:"P-256"}, true, ["deriveKey"]);
         S.keys.pub = k.publicKey;
@@ -741,6 +861,7 @@ async function loadKeys() {
         localStorage.setItem('mw_key_pub', JSON.stringify(await window.crypto.subtle.exportKey("jwk", k.publicKey)));
         localStorage.setItem('mw_key_priv', JSON.stringify(await window.crypto.subtle.exportKey("jwk", k.privateKey)));
     }
+    // Note: In a real app, we'd upload pubkey here, but we do it above if exists or after gen
 }
 
 async function saveSession(u, k) {
@@ -819,6 +940,8 @@ async function poll(){
                 await save('dm',m.from_user,h); if(S.id==m.from_user) renderChat(); 
                 continue; 
             }
+            if(m.type=='wencrypt_ready'){ handleWeReady(m); continue; }
+            if(m.type=='wencrypt_key'){ handleWeKey(m); continue; }
             if(m.type=='enc'){ try{m.message=await dec(m.from_user,m.message,m.extra_data)}catch(e){m.message="[Encrypted]"} }
             await store('dm',m.from_user,m);
             let prev = m.type==='text' ? m.message : '['+m.type+']';
@@ -906,6 +1029,7 @@ async function store(t,i,m){
         }
         return;
     }
+    if(m.type.startsWith('wencrypt_')) return; // Don't store signals
     if(m.type=='react'){
         let tg=h.find(x=>x.timestamp==m.extra_data);
         if(tg){ if(!tg.reacts)tg.reacts={}; tg.reacts[m.from_user]=m.message; await save(t,i,h); if(S.id==i && S.type==t) renderChat(); }
@@ -925,7 +1049,11 @@ async function removeMsg(t,i,ts){
     if(idx!=-1){ h.splice(idx,1); await save(t,i,h); if(S.id==i && S.type==t) renderChat(); }
 }
 
-async function startE2EE(){
+function toggleEncryption(){
+    if(S.type=='dm') startE2EE();
+    else if(S.type=='group') startWEncrypt();
+}
+async function startE2EE(){ // DM Logic
     if(!window.crypto || !window.crypto.subtle) { alertModal('Error', 'Encryption requires HTTPS'); return; }
     if(S.type!='dm'||S.e2ee[S.id])return;
     let exp=await window.crypto.subtle.exportKey("jwk",S.keys.pub);
@@ -961,6 +1089,84 @@ async function dec(u,c,i){
     return new TextDecoder().decode(d);
 }
 
+// --- WENCRYPT (GROUP E2EE) ---
+async function startWEncrypt(){
+    if(!confirm("WEncrypt cannot be disabled once started. All members must be online. Proceed?")) return;
+    S.we.active = true;
+    S.we.ready = [];
+    document.getElementById('we-overlay').style.display='flex';
+    req('send', {group_id:S.id, type:'wencrypt_ready', message:'READY'});
+}
+
+function handleWeReady(m){
+    if(S.type!='group' || S.id!=m.group_id || !S.we.active) return;
+    if(!S.we.ready.includes(m.from_user)) S.we.ready.push(m.from_user);
+    
+    // Check if we are owner and everyone is ready
+    // We need total member count. We can get it from get_group_details cache or fetch
+    fetch('?action=get_group_details&id='+S.id).then(r=>r.json()).then(async d=>{
+        let total = d.members.length;
+        document.getElementById('we-status').innerText = `Waiting for members... (${S.we.ready.length}/${total})`;
+        
+        if(d.is_owner && S.we.ready.length >= total){
+            // Generate Group Key
+            let gk = await window.crypto.subtle.generateKey({name:"AES-GCM",length:256}, true, ["encrypt","decrypt"]);
+            let gkExp = await window.crypto.subtle.exportKey("jwk", gk);
+            let payload = {};
+            
+            for(let mem of d.members){
+                if(mem.username == ME) { payload[ME] = JSON.stringify(gkExp); continue; }
+                if(!mem.public_key) continue; // Skip users without keys
+                
+                // Derive session key for this user
+                let theirPub = await window.crypto.subtle.importKey("jwk", JSON.parse(mem.public_key), {name:"ECDH",namedCurve:"P-256"}, true, []);
+                let sessKey = await window.crypto.subtle.deriveKey({name:"ECDH",public:theirPub}, S.keys.priv, {name:"AES-GCM",length:256}, false, ["encrypt"]);
+                
+                // Encrypt the Group Key with Session Key
+                let iv = window.crypto.getRandomValues(new Uint8Array(12));
+                let buf = await window.crypto.subtle.encrypt({name:"AES-GCM",iv:iv}, sessKey, new TextEncoder().encode(JSON.stringify(gkExp)));
+                
+                let b=''; new Uint8Array(buf).forEach(x=>b+=String.fromCharCode(x));
+                let i=''; iv.forEach(x=>i+=String.fromCharCode(x));
+                payload[mem.username] = btoa(b)+':'+btoa(i);
+            }
+            req('send', {group_id:S.id, type:'wencrypt_key', message:JSON.stringify(payload)});
+        }
+    });
+}
+
+async function handleWeKey(m){
+    if(S.type!='group' || S.id!=m.group_id) return;
+    let payload = JSON.parse(m.message);
+    if(payload[ME]){
+        // If owner sent it to themselves (unencrypted) or encrypted
+        let kStr = payload[ME];
+        if(m.from_user != ME){
+            // Decrypt
+            let parts = kStr.split(':');
+            let ownerPub = await getOwnerPub(m.group_id, m.from_user); // Need to fetch owner pub key
+            if(!ownerPub) return;
+            let sessKey = await window.crypto.subtle.deriveKey({name:"ECDH",public:ownerPub}, S.keys.priv, {name:"AES-GCM",length:256}, false, ["decrypt"]);
+            let d = await window.crypto.subtle.decrypt({name:"AES-GCM",iv:Uint8Array.from(atob(parts[1]),c=>c.charCodeAt(0))}, sessKey, Uint8Array.from(atob(parts[0]),c=>c.charCodeAt(0)));
+            kStr = new TextDecoder().decode(d);
+        }
+        let gk = await window.crypto.subtle.importKey("jwk", JSON.parse(kStr), {name:"AES-GCM",length:256}, false, ["encrypt","decrypt"]);
+        S.e2ee[S.id] = gk;
+        S.we.active = false;
+        document.getElementById('we-overlay').style.display='none';
+        document.getElementById('btn-e2ee').classList.add('e2ee-on');
+        alertModal("WEncrypt", "Group is now encrypted.");
+    }
+}
+
+async function getOwnerPub(gid, ownerName){
+    let r = await fetch('?action=get_group_details&id='+gid);
+    let d = await r.json();
+    let u = d.members.find(x=>x.username==ownerName);
+    if(u && u.public_key) return await window.crypto.subtle.importKey("jwk", JSON.parse(u.public_key), {name:"ECDH",namedCurve:"P-256"}, true, []);
+    return null;
+}
+
 function switchTab(t){
     S.tab=t;
     document.querySelectorAll('.rail-btn').forEach(e=>e.classList.remove('active'));
@@ -979,11 +1185,14 @@ async function renderLists(){
     try {
         let dh='';
         let filter = document.getElementById('chat-search').value.toLowerCase();
+        let chatFilter = document.getElementById('chat-search').value.toLowerCase();
+        let groupFilter = document.getElementById('group-search') ? document.getElementById('group-search').value.toLowerCase() : '';
         let keys = (await dbOp('readonly', s => s.getAllKeys())) || [];
         for(let k of keys){
             if(k.startsWith('mw_dm_')){
                 let u=k.split('mw_dm_')[1];
                 if(filter && !u.toLowerCase().includes(filter)) continue;
+                if(chatFilter && !u.toLowerCase().includes(chatFilter)) continue;
                 let h = await get('dm', u);
                 let sec=S.e2ee[u]?' e2ee-on':'';
                 let last=h.length?h[h.length-1].message:'Start chatting';
@@ -1000,6 +1209,7 @@ async function renderLists(){
         let gh='';
         Object.values(S.groups).forEach(g=>{
             if(filter && !g.name.toLowerCase().includes(filter)) return;
+            if(groupFilter && !g.name.toLowerCase().includes(groupFilter)) return;
             gh+=`<div class="list-item ${S.id==g.id?'active':''}" onclick="openChat('group',${g.id})" oncontextmenu="onChatListContext(event, 'group', ${g.id})">
                 <div class="avatar">#</div>
                 <div><div style="font-weight:bold">${g.name}</div><div style="font-size:0.8em;color:#888">${g.type}</div></div>
@@ -1019,7 +1229,7 @@ async function openChat(t,i){
     document.getElementById('main-view').classList.add('active');
         document.getElementById('nav-panel').classList.add('hidden');
     let tit=i, sub='', av='';
-    document.getElementById('btn-e2ee').style.display=(t=='dm'?'block':'none');
+    document.getElementById('btn-e2ee').style.display=(t=='dm'||t=='group'?'block':'none');
     if(t=='dm'){
         let ou=S.online.find(x=>x.username==i);
         sub=ou?(ou.bio||'Online'):'Offline'; av=ou?ou.avatar:'';
@@ -1036,6 +1246,7 @@ async function openChat(t,i){
     document.getElementById('chat-title').innerText=tit;
     document.getElementById('chat-sub').innerText=sub;
     document.getElementById('txt').placeholder = (t=='dm' && S.e2ee[S.id]) ? "Type an encrypted message..." : "Type a message...";
+    setTimeout(()=>document.getElementById('txt').focus(), 50);
     
     if(t=='dm'){ let h=await get('dm',i); let last=h.filter(x=>x.from_user==i).pop(); if(last && last.timestamp>lastRead){ lastRead=last.timestamp; req('send',{to_user:i,type:'read',extra:last.timestamp}); } }
 }
@@ -1081,8 +1292,17 @@ function createMsgNode(m, showSender){
 async function renderChat(){
     let c=document.getElementById('msgs'); c.innerHTML='';
     let h = await get(S.type,S.id);
-    let last=null;
+    let last=null, lastDate=null;
     h.forEach(m=>{
+        let d = new Date(m.timestamp*1000);
+        let dateStr = d.toLocaleDateString();
+        if(dateStr !== lastDate) {
+            let sep = document.createElement('div');
+            sep.style.cssText = "text-align:center;font-size:0.8rem;color:#666;margin:10px 0;position:sticky;top:0;z-index:5;";
+            sep.innerHTML = `<span style="background:var(--panel);padding:4px 10px;border-radius:10px;border:1px solid var(--border)">${dateStr}</span>`;
+            c.appendChild(sep);
+            lastDate = dateStr;
+        }
         let show=(S.type=='public'||S.type=='group') && m.from_user!=ME && m.from_user!=last;
         c.appendChild(createMsgNode(m, show));
         last=m.from_user;
@@ -1101,6 +1321,7 @@ async function send(){
     
     // Optimistic UI
     document.getElementById('txt').value=''; 
+    document.getElementById('txt').style.height='40px';
     cancelReply();
     
     let ts = Math.floor(Date.now()/1000);
@@ -1322,18 +1543,116 @@ function downloadFile(data, name){
 
 function cancelReply(){ S.reply=null; document.getElementById('reply-ui').style.display='none'; document.getElementById('del-btn').style.display='none'; }
 function promptChat(){ promptModal("New Chat", "Username:", async (u)=>{ if(u){ let ex=await get('dm',u); if(!ex.length) await save('dm',u,[]); openChat('dm',u); switchTab('chats'); }}); }
-function createGroup(){ promptModal("New Group", "Group Name:", (n)=>{ if(n)req('create_group',{name:n,type:'public'}); }); }
-function joinGroup(){ promptModal("Join Group", "6-Digit Code:", (c)=>{ if(c)req('join_group',{code:c}); }); }
+
+function createGroup(){ 
+    alertModal("Create Group", "");
+    document.getElementById('modal-ok').style.display='none';
+    document.getElementById('modal-cancel').style.display='block';
+    document.getElementById('modal-body').innerHTML = `
+        <input id="ng-name" class="form-input" placeholder="Group Name">
+        <select id="ng-type" class="form-select">
+            <option value="public">Public (Code)</option>
+            <option value="discoverable">Discoverable (Listed)</option>
+            <option value="private">Private (Invite Only)</option>
+        </select>
+        <button class="btn-primary" style="width:100%;margin-top:10px" onclick="doCreateGroup()">Create</button>
+    `;
+}
+function doCreateGroup(){
+    let n=document.getElementById('ng-name').value;
+    let t=document.getElementById('ng-type').value;
+    let btn=document.querySelector('#modal-body button');
+    if(n) {
+        btn.disabled=true; btn.innerText='Creating...';
+        req('create_group',{name:n,type:t}).then(r=>r.json()).then(d=>{
+        if(d.status=='success'){ document.getElementById('app-modal').style.display='none'; renderLists(); }
+        else { alert(d.message||'Error'); btn.disabled=false; btn.innerText='Create'; }
+    }).catch(()=>{ alert('Connection failed'); btn.disabled=false; btn.innerText='Create'; });
+    }
+}
+
+function joinGroup(){ 
+    alertModal("Join Group", "");
+    document.getElementById('modal-body').innerHTML = `
+        <input id="jg-code" class="form-input" placeholder="Invite Code">
+        <input id="jg-pass" class="form-input" type="password" placeholder="Password (Optional)">
+        <button class="btn-primary" style="width:100%;margin-top:10px" onclick="doJoinGroup()">Join</button>
+    `;
+}
+function doJoinGroup(){
+    let c=document.getElementById('jg-code').value;
+    let p=document.getElementById('jg-pass').value;
+    if(c) req('join_group',{code:c, password:p}).then(r=>r.json()).then(d=>{
+        if(d.status=='success'){ document.getElementById('app-modal').style.display='none'; renderLists(); }
+        else alert(d.message);
+    });
+}
+
 function saveSettings(){ req('update_profile',{bio:document.getElementById('set-bio').value,avatar:document.getElementById('set-av').value,new_password:document.getElementById('set-pw').value}); alertModal("Settings", "Profile updated."); }
 
+async function discoverGroups(){ alertModal("Discover Groups", "Loading..."); let r=await fetch('?action=get_discoverable_groups'); let d=await r.json(); let h='<div style="max-height:300px;overflow-y:auto">'; d.groups.forEach(g=>{ h+=`<div style="padding:10px;border-bottom:1px solid #333;display:flex;justify-content:space-between;align-items:center"><div><b>${g.name}</b><br><span style="color:#888;font-size:0.8rem">Code: ${g.join_code}</span></div><button class="btn-sec" onclick="req('join_group',{code:'${g.join_code}'}).then(()=>{document.getElementById('app-modal').style.display='none';renderLists()})">Join</button></div>`; }); h+='</div>'; document.getElementById('modal-body').innerHTML=h; }
+
 async function showProfilePopup() {
-    if(S.type !== 'dm') return;
-    let r = await fetch('?action=get_profile&u='+S.id);
-    let p = await r.json();
-    if(p.status === 'error') return;
-    
-    let info = `Username: ${p.username}\nBio: ${p.bio||'-'}\nJoined: ${new Date(p.joined_at*1000).toLocaleDateString()}\nLast Seen: ${new Date(p.last_seen*1000).toLocaleString()}`;
-    alertModal("Profile: " + p.username, info);
+    if(S.type === 'dm') {
+        let r = await fetch('?action=get_profile&u='+S.id);
+        let p = await r.json();
+        if(p.status === 'error') return;
+        let info = `Username: ${p.username}\nBio: ${p.bio||'-'}\nJoined: ${new Date(p.joined_at*1000).toLocaleDateString()}\nLast Seen: ${new Date(p.last_seen*1000).toLocaleString()}`;
+        alertModal("Profile: " + p.username, info);
+    } else if (S.type === 'group') {
+        let r = await fetch('?action=get_group_details&id='+S.id);
+        let d = await r.json();
+        if(d.status === 'error') return;
+        
+        let html = `<div style="text-align:center;margin-bottom:15px">
+            <b>${d.group.name}</b><br>
+            <span style="color:#888;font-size:0.8rem">${d.group.type} ${d.group.join_code ? '| Code: '+d.group.join_code : ''}</span><br>
+            ${d.is_owner && d.group.type=='private' ? `<button class="btn-sec" style="font-size:0.7rem;margin-top:5px" onclick="groupSettings(${S.id})">Manage Invite</button>` : ''}
+        </div>
+        <div style="max-height:200px;overflow-y:auto;text-align:left;margin-bottom:15px;background:#222;padding:10px;border-radius:8px">
+            <div style="font-size:0.8rem;color:#aaa;margin-bottom:5px">Members (${d.members.length})</div>
+            ${d.members.map(m=>`<div style="padding:5px;border-bottom:1px solid #333;display:flex;align-items:center">
+                <div class="avatar" style="width:24px;height:24px;font-size:0.8rem;margin-right:8px;background-image:url('${m.avatar||''}')">${m.avatar?'':m.username[0]}</div>
+                <span>${m.username}</span> ${m.public_key?'<span title="Key Available" style="color:#0f0;font-size:0.6rem;margin-left:5px">🔑</span>':''}
+            </div>`).join('')}
+        </div>
+        <div style="display:flex;gap:10px;justify-content:center">
+            <button class="btn-modal btn-sec" style="color:#f55;border-color:#f55" onclick="leaveGroup(${S.id})">Leave Group</button>
+            ${d.is_owner ? `<button class="btn-modal btn-sec" style="color:#f55;border-color:#f55" onclick="nukeGroup(${S.id})">Delete Group</button>` : ''}
+        </div>`;
+        
+        alertModal("Group Info", ""); 
+        document.getElementById('modal-body').innerHTML = html;
+    }
+}
+
+function groupSettings(gid){
+    alertModal("Group Settings", "");
+    document.getElementById('modal-body').innerHTML = `
+        <div class="form-group"><label>Enable Joining</label> <input type="checkbox" id="gs-join"></div>
+        <div class="form-group"><label>Code Suffix (Letter)</label><input id="gs-suff" class="form-input" maxlength="1" placeholder="A-Z"></div>
+        <div class="form-group"><label>Password (Optional)</label><input id="gs-pass" class="form-input" type="password"></div>
+        <div class="form-group"><label>Expiry (Minutes)</label><input id="gs-exp" class="form-input" type="number" placeholder="60"></div>
+        <button class="btn-primary" style="width:100%;margin-top:10px" onclick="saveGroupSettings(${gid})">Generate New Code</button>
+    `;
+}
+function saveGroupSettings(gid){
+    let j = document.getElementById('gs-join').checked ? 1 : 0;
+    let s = document.getElementById('gs-suff').value;
+    let p = document.getElementById('gs-pass').value;
+    let e = document.getElementById('gs-exp').value;
+    req('update_group_settings', {group_id:gid, join_enabled:j, generate_code:true, suffix:s, password:p, expiry:e}).then(r=>r.json()).then(d=>{
+        if(d.status=='success') { alert("Settings updated & Code generated"); showProfilePopup(); }
+        else alert(d.message);
+    });
+}
+
+function leaveGroup(gid){
+    if(confirm("Leave this group?")) req('leave_group', {group_id: gid}).then(d=>{ if(d.status=='success'){ closeChat(); delete S.groups[gid]; renderLists(); document.getElementById('app-modal').style.display='none'; } });
+}
+
+function nukeGroup(gid){
+    if(confirm("Delete group for everyone?")) req('delete_group', {group_id: gid}).then(d=>{ if(d.status=='success'){ closeChat(); delete S.groups[gid]; renderLists(); document.getElementById('app-modal').style.display='none'; } });
 }
 
 function scrollToBottom(force){ 
@@ -1343,7 +1662,7 @@ function scrollToBottom(force){
 }
 function esc(t){ return t?t.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"):"" }
 
-document.getElementById('txt').onkeypress=e=>{if(e.key=='Enter')send()};
+document.getElementById('txt').onkeydown=e=>{if(e.key=='Enter' && !e.shiftKey){e.preventDefault();send()}};
 
 async function startRec(){
     try{
@@ -1381,7 +1700,8 @@ function stopRec(send){
     mediaRec.stop();
 }
 
-document.getElementById('txt').oninput=()=>{
+document.getElementById('txt').oninput=function(){
+    this.style.height='auto'; this.style.height=Math.min(this.scrollHeight,150)+'px';
     if(S.type=='dm' && Date.now()-lastTyping>2000){ lastTyping=Date.now(); req('typing',{to:S.id}); }
 };
 window.onclick=(e)=>{
@@ -1393,6 +1713,12 @@ window.oncontextmenu = (e) => {
     if(e.defaultPrevented) return;
     if(e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
     showContextMenu(e, 'app', null);
+};
+window.onkeydown = (e) => {
+    if(e.key === 'Escape') {
+        if(document.getElementById('app-modal').style.display === 'flex') document.getElementById('modal-cancel').click();
+        else if(document.getElementById('main-view').classList.contains('active')) closeChat();
+    }
 };
 window.onfocus=()=>{ if(S.type=='dm'&&S.id) openChat('dm',S.id); };
 

@@ -101,8 +101,8 @@ if ($action === 'manifest') {
         "short_name" => "Messenger",
         "start_url" => "index.php",
         "display" => "standalone",
-        "background_color" => "#121212",
-        "theme_color" => "#121212",
+        "background_color" => "#0f0518",
+        "theme_color" => "#0f0518",
         "icons" => [
             ["src" => "?action=icon", "sizes" => "192x192", "type" => "image/svg+xml"],
             ["src" => "?action=icon", "sizes" => "512x512", "type" => "image/svg+xml"]
@@ -112,7 +112,7 @@ if ($action === 'manifest') {
 }
 if ($action === 'icon') {
     header('Content-Type: image/svg+xml');
-    echo '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="100" fill="#1e1e1e"/><path d="M256 85c-93 0-168 69-168 154 0 49 25 92 64 121v62l60-33c14 4 29 6 44 6 93 0 168-69 168-154S349 85 256 85z" fill="#00a884"/></svg>';
+    echo '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="100" fill="#1a0b2e"/><path d="M256 85c-93 0-168 69-168 154 0 49 25 92 64 121v62l60-33c14 4 29 6 44 6 93 0 168-69 168-154S349 85 256 85z" fill="#a855f7"/></svg>';
     exit;
 }
 if ($action === 'sw') {
@@ -169,8 +169,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // AUTH
     if ($action === 'register') {
-        $user = trim(htmlspecialchars(strtolower($input['username'])));
+        $user = trim($input['username']);
         if (strlen($user) > 30) { echo json_encode(['status'=>'error','message'=>'Username too long']); exit; }
+        if (!preg_match('/^[a-zA-Z0-9_]+$/', $user)) { echo json_encode(['status'=>'error','message'=>'Use letters, numbers, _ only']); exit; }
+
+        $stmt = $db->prepare("SELECT 1 FROM users WHERE lower(username) = lower(?)");
+        $stmt->execute([$user]);
+        if ($stmt->fetch()) { echo json_encode(['status'=>'error','message'=>'Username taken']); exit; }
+
         $pass = password_hash($input['password'], PASSWORD_DEFAULT);
         try {
             $stmt = $db->prepare("INSERT INTO users (username, password, joined_at, last_seen) VALUES (?, ?, ?, ?)");
@@ -179,11 +185,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['user'] = $user;
             $_SESSION['uid'] = $db->lastInsertId();
             echo json_encode(['status' => 'success']);
-        } catch (PDOException $e) { echo json_encode(['status' => 'error', 'message' => 'Username taken']); }
+        } catch (PDOException $e) { echo json_encode(['status' => 'error', 'message' => 'Registration failed']); }
         exit;
     }
     if ($action === 'login') {
-        $stmt = $db->prepare("SELECT * FROM users WHERE lower(username) = ?");
+        $stmt = $db->prepare("SELECT id, username, password FROM users WHERE lower(username) = lower(?)");
         $stmt->execute([$input['username']]);
         $row = $stmt->fetch();
         if ($row && password_verify($input['password'], $row['password'])) {
@@ -413,25 +419,32 @@ if (!isset($_SESSION['user'])) {
 <html lang="en">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>moreweb Messenger - Login</title>
 <link rel="manifest" href="?action=manifest">
-<meta name="theme-color" content="#121212">
+<meta name="theme-color" content="#0f0518">
 <link rel="icon" href="?action=icon" type="image/svg+xml">
 <style>
-body{background:#121212;color:#eee;font-family:sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}
-.box{background:#1e1e1e;padding:2rem;border-radius:12px;width:300px;text-align:center;box-shadow:0 10px 30px rgba(0,0,0,0.5)}
-input{width:100%;padding:12px;margin:10px 0;background:#2c2c2c;border:1px solid #333;color:#fff;border-radius:6px;box-sizing:border-box}
-button{width:100%;padding:12px;background:#00a884;color:#fff;border:none;border-radius:6px;font-weight:bold;cursor:pointer}
+body{background:#0f0518;color:#eee;font-family:sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}
+.box{background:#1a0b2e;padding:2rem;border-radius:12px;width:300px;text-align:center;box-shadow:0 10px 30px rgba(0,0,0,0.5);border:1px solid #2f1b42}
+input{width:100%;padding:12px;margin:10px 0;background:#261038;border:1px solid #2f1b42;color:#fff;border-radius:6px;box-sizing:border-box}
+button{width:100%;padding:12px;background:#a855f7;color:#fff;border:none;border-radius:6px;font-weight:bold;cursor:pointer}
 </style>
 </head>
 <body>
 <div class="box">
     <h2 id="ttl">moreweb Messenger</h2><div id="err" style="color:#f55;display:none;margin-bottom:10px"></div>
     <input id="u" placeholder="Username"><input type="password" id="p" placeholder="Password">
-    <button onclick="sub()">Login</button>
-    <p style="color:#888;cursor:pointer;font-size:0.9rem" onclick="reg=!reg;document.getElementById('ttl').innerText=reg?'Register':'Login'">Toggle Login/Register</p>
+    <button onclick="sub()">Sign In</button>
+    <p id="toggle-text" style="color:#888;cursor:pointer;font-size:0.9rem" onclick="toggleMode()">Need an account? Create one</p>
 </div>
 <script>
 const CSRF_TOKEN = "<?php echo $_SESSION['csrf_token']; ?>";
 let reg=false;
+function toggleMode() {
+    reg = !reg;
+    document.getElementById('ttl').innerText = reg ? 'Create Account' : 'moreweb Messenger';
+    document.querySelector('button').innerText = reg ? 'Sign Up' : 'Sign In';
+    document.getElementById('toggle-text').innerText = reg ? 'Already have an account? Sign In' : 'Need an account? Create one';
+    document.getElementById('err').style.display = 'none';
+}
 async function sub(){
     let btn=document.querySelector('button');btn.disabled=true;btn.innerText='Processing...';
     let u=document.getElementById('u').value,p=document.getElementById('p').value;
@@ -441,7 +454,7 @@ async function sub(){
         body:JSON.stringify({username:u,password:p})
     });
     let d=await r.json();
-    if(d.status=='success')location.reload();else{let e=document.getElementById('err');e.innerText=d.message;e.style.display='block';btn.disabled=false;btn.innerText=reg?'Register':'Login';}
+    if(d.status=='success')location.reload();else{let e=document.getElementById('err');e.innerText=d.message;e.style.display='block';btn.disabled=false;btn.innerText=reg?'Sign Up':'Sign In';}
 }
 if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
 </script></body></html>
@@ -453,12 +466,12 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <link rel="manifest" href="?action=manifest">
-<meta name="theme-color" content="#121212">
+<meta name="theme-color" content="#0f0518">
 <link rel="icon" href="?action=icon" type="image/svg+xml">
 <title>moreweb Messenger</title>
 <style>
-    :root { --bg:#121212; --rail:#0b0b0b; --panel:#1e1e1e; --border:#2a2a2a; --accent:#00a884; --text:#e0e0e0; --msg-in:#2c2c2c; --msg-out:#005c4b; }
-    .light-mode { --bg:#ffffff; --rail:#f0f0f0; --panel:#f5f5f5; --border:#ddd; --text:#111; --msg-in:#fff; --msg-out:#d9fdd3; }
+    :root { --bg:#0f0518; --rail:#0b0b0b; --panel:#1a0b2e; --border:#2f1b42; --accent:#a855f7; --text:#e0e0e0; --msg-in:#261038; --msg-out:#581c87; }
+    .light-mode { --bg:#ffffff; --rail:#f0f0f0; --panel:#f5f5f5; --border:#ddd; --text:#111; --msg-in:#fff; --msg-out:#f3e8ff; }
     .light-mode .rail-btn { color:#555; }
     .light-mode .rail-btn:hover { background:#e0e0e0; color:#000; }
     .light-mode .list-item:hover { background:#f0f0f0; }
@@ -468,7 +481,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
     .light-mode .reply-ctx { background:#eee; color:#333; }
     .light-mode .ctx-menu { background:#fff; border-color:#ccc; }
 
-    .e2ee-on { color: #00a884; }
+    .e2ee-on { color: var(--accent); }
     body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; background:var(--bg); color:var(--text); height:100vh; display:flex; overflow:hidden; }
     
     /* Layout */
@@ -525,7 +538,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
     #txt { width:100%; padding:10px 12px; border-radius:20px; border:none; background:#333; color:#fff; outline:none; box-sizing:border-box; resize:none; height:40px; font-family:inherit; overflow-y:hidden; line-height:1.4; display:block; }
     
     #btn-e2ee svg { fill: var(--accent); }
-    .btn-icon { background:none; border:none; color:#888; cursor:pointer; display:flex; align-items:center; justify-content:center; border-radius:50%; transition:0.2s; }
+    .btn-icon { background:none; border:none; color:#888; cursor:pointer; display:flex; align-items:center; justify-content:center; border-radius:50%; transition:0.2s; width:40px; height:40px; padding:0; position:relative; flex-shrink:0; }
     .btn-icon:hover { color:#fff; background:rgba(255,255,255,0.1); }
     .btn-primary { background:var(--accent); color:#fff; border:none; padding:8px 16px; border-radius:20px; cursor:pointer; font-weight:bold; }
     
@@ -547,7 +560,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
     
     /* WEncrypt Overlay */
     .we-overlay { position:absolute; top:60px; left:0; width:100%; height:calc(100% - 60px); background:rgba(0,0,0,0.85); z-index:50; display:none; flex-direction:column; align-items:center; justify-content:center; text-align:center; }
-    .we-status { margin-top:20px; color:#00a884; font-size:1.2rem; }
+    .we-status { margin-top:20px; color:var(--accent); font-size:1.2rem; }
 
     /* Context Menu */
     .ctx-menu { position:fixed; background:var(--panel); border:1px solid var(--border); border-radius:8px; box-shadow:0 5px 20px rgba(0,0,0,0.5); z-index:2000; min-width:180px; overflow:hidden; font-size:0.9rem; }
@@ -650,15 +663,15 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
     <div class="nav-panel" id="nav-panel">
         <div id="tab-chats" class="tab-content">
             <div style="padding:20px 15px 5px 15px"><input type="text" id="chat-search" class="form-input" placeholder="Search chats..." onkeyup="renderLists()" style="margin:0;padding:10px 15px;border-radius:20px"></div>
-        <div class="panel-header" style="padding-top:5px;padding-bottom:5px;border-bottom:none">Chats <div class="btn-icon" onclick="promptChat()" style="width:32px;height:32px">+</div></div>
+            <div class="panel-header" style="padding-top:5px;padding-bottom:5px;border-bottom:none">Chats <div class="btn-icon" onclick="promptChat()">+</div></div>
             <div class="list-area" id="list-chats"></div>
         </div>
         <div id="tab-groups" class="tab-content" style="display:none">
             <div style="padding:20px 15px 5px 15px"><input type="text" id="group-search" class="form-input" placeholder="Search groups..." onkeyup="renderLists()" style="margin:0;padding:10px 15px;border-radius:20px"></div>
             <div class="panel-header" style="padding-top:5px;padding-bottom:5px;border-bottom:none">Groups 
                 <div style="display:flex;gap:5px">
-                    <div class="btn-icon" onclick="discoverGroups()" title="Discover Groups" style="width:32px;height:32px">🌍</div>
-                    <div class="btn-icon" onclick="createGroup()" title="Create Group" style="width:32px;height:32px">+</div>
+                <div class="btn-icon" onclick="discoverGroups()" title="Discover Groups">🌍</div>
+                <div class="btn-icon" onclick="createGroup()" title="Create Group">+</div>
                 </div></div>
             <div style="padding:0 15px 10px 15px"><button class="form-input" style="cursor:pointer;border-radius:20px;text-align:center;background:var(--bg);border:1px solid var(--border)" onclick="joinGroup()">Join via Code</button></div>
             <div class="list-area" id="list-groups"></div>
@@ -710,15 +723,12 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
             </div>
             
             <div class="header-actions">
-                <button class="btn-icon" id="btn-e2ee" onclick="toggleEncryption()" title="Encryption" style="display:none">
-                    <svg viewBox="0 0 24 24" width="20"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-9-2c0-1.66 1.34-3 3-3s3 1.34 3 3v2H9V6zm9 14H6V10h12v10zm-6-3c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2z"/></svg>
-                </button>
-                <div class="notif-btn" onclick="toggleNotif()">
+                <div class="btn-icon notif-btn" onclick="toggleNotif()">
                     <svg viewBox="0 0 24 24" width="24" fill="currentColor"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.63-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.64 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2zm-2 1H8v-6c0-2.48 1.51-4.5 4-4.5s4 2.02 4 4.5v6z"/></svg>
                     <div class="notif-badge" id="notif-count">0</div>
                     <div class="notif-dropdown" id="notif-list"></div>
                 </div>
-                <div class="menu-btn" onclick="toggleMenu(event)">
+                <div class="btn-icon menu-btn" onclick="toggleMenu(event)">
                     <svg viewBox="0 0 24 24" width="24" fill="currentColor"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
                     <div class="menu-dropdown" id="chat-menu">
                         <div class="menu-item" onclick="clearChat()">Clear History</div>
@@ -730,7 +740,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
         </div>
 
         <div id="we-overlay" class="we-overlay">
-            <svg viewBox="0 0 24 24" width="64" height="64" fill="#00a884"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-9-2c0-1.66 1.34-3 3-3s3 1.34 3 3v2H9V6zm9 14H6V10h12v10zm-6-3c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2z"/></svg>
+            <svg viewBox="0 0 24 24" width="64" height="64" style="fill:var(--accent)"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-9-2c0-1.66 1.34-3 3-3s3 1.34 3 3v2H9V6zm9 14H6V10h12v10zm-6-3c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2z"/></svg>
             <div class="we-status" id="we-status">Waiting for members...</div>
             <div style="margin-top:10px;color:#888;font-size:0.9rem">Do not leave this screen.</div>
         </div>
@@ -748,7 +758,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
             <div class="input-wrapper">
                 <div class="reply-ctx" id="reply-ui">
                     <span id="reply-txt"></span>
-                    <button id="del-btn" class="btn-icon" style="display:none;font-size:0.8rem;color:#f55;margin-right:10px" onclick="deleteMsg()">Delete</button>
+                <button id="del-btn" style="display:none;font-size:0.8rem;color:#f55;margin-right:10px;background:none;border:none;cursor:pointer" onclick="deleteMsg()">Delete</button>
                     <span onclick="cancelReply()" style="cursor:pointer">&times;</span>
                 </div>
                 <div id="rec-ui" style="display:none;align-items:center;height:40px;background:#333;border-radius:20px;padding:0 15px;color:#f55">
@@ -1075,7 +1085,7 @@ async function handleSignalAck(m){
     let fk=await window.crypto.subtle.importKey("jwk",JSON.parse(m.message),{name:"ECDH",namedCurve:"P-256"},true,[]);
     await saveSession(m.from_user, await window.crypto.subtle.deriveKey({name:"ECDH",public:fk},S.keys.priv,{name:"AES-GCM",length:256},false,["encrypt","decrypt"]));
     alertModal("Security", "Secure channel ready with "+m.from_user);
-    if(S.id==m.from_user) { document.getElementById('btn-e2ee').classList.add('e2ee-on'); document.getElementById('txt').placeholder="Type an encrypted message..."; }
+    if(S.id==m.from_user) { document.getElementById('txt').placeholder="Type an encrypted message..."; }
 }
 async function enc(u,txt){
     let iv=window.crypto.getRandomValues(new Uint8Array(12));
@@ -1154,7 +1164,6 @@ async function handleWeKey(m){
         S.e2ee[S.id] = gk;
         S.we.active = false;
         document.getElementById('we-overlay').style.display='none';
-        document.getElementById('btn-e2ee').classList.add('e2ee-on');
         alertModal("WEncrypt", "Group is now encrypted.");
     }
 }
@@ -1231,7 +1240,6 @@ async function openChat(t,i){
     document.getElementById('main-view').classList.add('active');
         document.getElementById('nav-panel').classList.add('hidden');
     let tit=i, sub='', av='';
-    document.getElementById('btn-e2ee').style.display=(t=='dm'||t=='group'?'block':'none');
     if(t=='dm'){
         let ou=S.online.find(x=>x.username==i);
         sub=ou?(ou.bio||'Online'):'Offline'; av=ou?ou.avatar:'';
@@ -1244,7 +1252,6 @@ async function openChat(t,i){
         tit="Public Chat"; sub="Global Room (5m TTL)";
         document.getElementById('chat-av').innerText='P';
     }
-    document.getElementById('btn-e2ee').classList.toggle('e2ee-on', S.e2ee[S.id]);
     document.getElementById('chat-title').innerText=tit;
     document.getElementById('chat-sub').innerText=sub;
     document.getElementById('txt').placeholder = (t=='dm' && S.e2ee[S.id]) ? "Type an encrypted message..." : "Type a message...";
@@ -1599,8 +1606,18 @@ async function showProfilePopup() {
         let r = await fetch('?action=get_profile&u='+S.id);
         let p = await r.json();
         if(p.status === 'error') return;
-        let info = `Username: ${p.username}\nBio: ${p.bio||'-'}\nJoined: ${new Date(p.joined_at*1000).toLocaleDateString()}\nLast Seen: ${new Date(p.last_seen*1000).toLocaleString()}`;
-        alertModal("Profile: " + p.username, info);
+        
+        let html = `<div style="text-align:center;margin-bottom:15px">
+            <div class="avatar" style="width:80px;height:80px;margin:0 auto 10px auto;font-size:2rem;background-image:url('${p.avatar||''}')">${p.avatar?'':p.username[0]}</div>
+            <b>${p.username}</b><br>
+            <span style="color:#888;font-size:0.8rem">${p.bio||'-'}</span><br>
+            <div style="font-size:0.8rem;color:#666;margin-top:5px">
+                Joined: ${new Date(p.joined_at*1000).toLocaleDateString()}<br>
+                Last Seen: ${new Date(p.last_seen*1000).toLocaleString()}
+            </div>
+            ${!S.e2ee[S.id] ? `<button class="btn-sec" style="margin-top:15px;width:100%" onclick="startE2EE();document.getElementById('app-modal').style.display='none'">Enable End-to-End Encryption</button>` : `<div style="margin-top:15px;color:var(--accent)">🔒 Encrypted</div>`}
+        </div>`;
+        alertModal("Profile", ""); document.getElementById('modal-body').innerHTML = html;
     } else if (S.type === 'group') {
         let r = await fetch('?action=get_group_details&id='+S.id);
         let d = await r.json();
@@ -1610,6 +1627,7 @@ async function showProfilePopup() {
             <b>${d.group.name}</b><br>
             <span style="color:#888;font-size:0.8rem">${d.group.type} ${d.group.join_code ? '| Code: '+d.group.join_code : ''}</span><br>
             ${d.is_owner && d.group.type=='private' ? `<button class="btn-sec" style="font-size:0.7rem;margin-top:5px" onclick="groupSettings(${S.id})">Manage Invite</button>` : ''}
+            ${!S.e2ee[S.id] ? `<button class="btn-sec" style="margin-top:10px;width:100%" onclick="startWEncrypt();document.getElementById('app-modal').style.display='none'">Enable WEncrypt</button>` : `<div style="margin-top:10px;color:var(--accent)">🔒 WEncrypt Active</div>`}
         </div>
         <div style="max-height:200px;overflow-y:auto;text-align:left;margin-bottom:15px;background:#222;padding:10px;border-radius:8px">
             <div style="font-size:0.8rem;color:#aaa;margin-bottom:5px">Members (${d.members.length})</div>

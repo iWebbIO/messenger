@@ -836,7 +836,7 @@ let lastTyping = 0;
 let lastRead = 0;
 let mediaRec=null, audChunks=[], recMime='';
 let currentAudio=null, currentBtn=null, updateInterval=null;
-let S = { tab:'chats', id:null, type:null, reply:null, ctx:null, dms:{}, groups:{}, online:[], notifs:[], keys:{pub:null,priv:null}, e2ee:{}, we:{active:false, ready:[]} };
+let S = { tab:'chats', id:null, type:null, reply:null, ctx:null, dms:{}, groups:{}, online:[], notifs:[], keys:{pub:null,priv:null}, e2ee:{}, we:{active:false, ready:[]}, scroll:{} };
 
 // --- INDEXEDDB HELPERS ---
 const DB_NAME = 'mw_chat_db';
@@ -1314,11 +1314,20 @@ async function renderLists(){
 }
 
 async function openChat(t,i){
+    if(S.id) {
+        let c=document.getElementById('msgs');
+        if(c.scrollHeight - c.scrollTop - c.clientHeight > 50) S.scroll[S.type+'_'+S.id] = c.scrollTop;
+        else delete S.scroll[S.type+'_'+S.id];
+    }
     document.getElementById('we-overlay').style.display='none';
     if(S.id!=i) lastRead=0;
     S.type=t; S.id=i;
     renderLists();
-    renderChat(); scrollToBottom(true);
+    await renderChat(); 
+    if(S.scroll[t+'_'+i]!==undefined) {
+        let c=document.getElementById('msgs'); c.scrollTop = S.scroll[t+'_'+i];
+        requestAnimationFrame(()=>c.scrollTop = S.scroll[t+'_'+i]);
+    } else scrollToBottom(true);
     document.getElementById('input-box').style.visibility='visible';
     document.getElementById('main-view').classList.add('active');
         document.getElementById('nav-panel').classList.add('hidden');
@@ -1389,8 +1398,8 @@ function createMsgNode(m, showSender){
 }
 
 async function renderChat(){
-    let c=document.getElementById('msgs'); c.innerHTML='';
     let h = await get(S.type,S.id);
+    let c=document.getElementById('msgs'); c.innerHTML='';
     let last=null, lastDate=null;
     h.forEach(m=>{
         let d = new Date(m.timestamp*1000);
@@ -1409,6 +1418,11 @@ async function renderChat(){
 }
 
 function closeChat() {
+    if(S.id) {
+        let c=document.getElementById('msgs');
+        if(c.scrollHeight - c.scrollTop - c.clientHeight > 50) S.scroll[S.type+'_'+S.id] = c.scrollTop;
+        else delete S.scroll[S.type+'_'+S.id];
+    }
     document.getElementById('main-view').classList.remove('active');
     document.getElementById('nav-panel').classList.remove('hidden');
     S.id=null;
@@ -1892,7 +1906,16 @@ window.onkeydown = (e) => {
         else if(document.getElementById('main-view').classList.contains('active')) closeChat();
     }
 };
-window.onfocus=()=>{ if(S.type=='dm'&&S.id) openChat('dm',S.id); };
+window.onfocus=async ()=>{ 
+    if(S.type=='dm'&&S.id) {
+        let h=await get('dm',S.id); 
+        let last=h.filter(x=>x.from_user==S.id).pop(); 
+        if(last && last.timestamp>lastRead){ 
+            lastRead=last.timestamp; 
+            req('send',{to_user:S.id,type:'read',extra:last.timestamp}); 
+        }
+    }
+};
 
 if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
 init().catch(e=>console.error(e));

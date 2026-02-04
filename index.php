@@ -456,7 +456,7 @@ body.login-process #login-bg { opacity: 1; }
         position: fixed; top: 0; left: 0; width: 100%; height: 100%;
         background-color: #000000; z-index: 9999;
         display: flex; justify-content: center; align-items: center;
-        animation: screenFadeOut 0.5s ease-in-out 2.4s forwards;
+        animation: screenFadeOut 0.5s ease-in-out 1.5s forwards;
         pointer-events: none;
     }
     .splash-screen .word {
@@ -466,33 +466,21 @@ body.login-process #login-bg { opacity: 1; }
         animation: fadeWordOut 0.3s cubic-bezier(0.55, 0.085, 0.68, 0.53) 1.0s forwards;
     }
     .splash-screen .word span { opacity: 0; position: relative; }
-    .splash-screen .message {
-        position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-        display: flex; flex-direction: column; align-items: center; justify-content: center;
-        text-align: center; width: 100%; pointer-events: none;
-    }
-    .splash-screen .message span { opacity: 0; line-height: 1.1; display: block; }
-    .splash-screen .line1 { font-size: clamp(3rem, 8vw, 6rem); font-weight: 400; color: var(--text-heading); margin-bottom: 0.5rem; }
-    .splash-screen .line2 { font-size: clamp(3rem, 8vw, 6rem); font-weight: 700; color: var(--neon-accent); text-shadow: 0 0 40px rgba(191, 0, 255, 0.4); }
 
     @keyframes letterAppear { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
     @keyframes fadeWordOut { from { opacity: 1; transform: scale(1); filter: blur(0); } to { opacity: 0; transform: scale(1.1); filter: blur(10px); } }
-    @keyframes messageAppear { from { opacity: 0; transform: translateY(40px) scale(0.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
     @keyframes screenFadeOut { to { opacity: 0; visibility: hidden; } }
 
     .splash-screen .word span:nth-child(1) { animation: letterAppear 0.3s ease-out 0.05s forwards; }
     .splash-screen .word span:nth-child(2) { animation: letterAppear 0.3s ease-out 0.15s forwards; }
     .splash-screen .word span:nth-child(3) { animation: letterAppear 0.3s ease-out 0.25s forwards; }
     .splash-screen .word span:nth-child(4) { animation: letterAppear 0.3s ease-out 0.30s forwards; }
-    .splash-screen .message .line1 { animation: messageAppear 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) 1.2s forwards; }
-    .splash-screen .message .line2 { animation: messageAppear 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) 1.35s forwards; }
 </style>
 </head>
 <body>
 
 <div class="splash-screen">
     <div class="word"><span>m</span><span>o</span><span>r</span><span>e</span></div>
-    <div class="message"><span class="line1">Beyond</span><span class="line2">The Web</span></div>
 </div>
 
 <div id="login-bg"></div>

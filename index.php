@@ -87,6 +87,12 @@ try {
         $db->exec("PRAGMA user_version = 2");
     }
 
+    if ($ver < 3) {
+        $gcols = $db->query("PRAGMA table_info(groups)")->fetchAll(PDO::FETCH_COLUMN, 1);
+        if (!in_array('category', $gcols)) $db->exec("ALTER TABLE groups ADD COLUMN category TEXT DEFAULT 'group'");
+        $db->exec("PRAGMA user_version = 3");
+    }
+
 } catch (PDOException $e) { die("DB Error: " . $e->getMessage()); }
 
 // -------------------------------------------------------------------------
@@ -131,8 +137,10 @@ if ($action === 'get_profile') {
 }
 if ($action === 'get_discoverable_groups') {
     header('Content-Type: application/json');
-    $stmt = $db->query("SELECT id, name, type, join_code FROM groups WHERE type = 'discoverable' ORDER BY created_at DESC LIMIT 50");
-    echo json_encode(['status'=>'success', 'groups'=>$stmt->fetchAll()]);
+    $cat = $_GET['cat'] ?? 'group';
+    $stmt = $db->prepare("SELECT id, name, type, join_code FROM groups WHERE type = 'discoverable' AND category = ? ORDER BY created_at DESC LIMIT 50");
+    $stmt->execute([$cat]);
+    echo json_encode(['status'=>'success', 'items'=>$stmt->fetchAll()]);
     exit;
 }
 if ($action === 'get_group_details') {
@@ -238,6 +246,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt = $db->prepare("INSERT INTO messages (from_user, to_user, message, type, reply_to_id, extra_data, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)");
             $stmt->execute([$me, $input['to_user'], $msg, $type, $reply, $extra, $ts]);
         } else if (isset($input['group_id'])) {
+            // Channel Permission Check
+            $gstmt = $db->prepare("SELECT owner_id, category FROM groups WHERE id = ?");
+            $gstmt->execute([$input['group_id']]);
+            $g = $gstmt->fetch();
+            if ($g && $g['category'] === 'channel' && $g['owner_id'] != $myId) {
+                echo json_encode(['status'=>'error','message'=>'Only the owner can post in this channel']); exit;
+            }
             $stmt = $db->prepare("INSERT INTO messages (group_id, from_user, message, type, reply_to_id, extra_data, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)");
             $stmt->execute([$input['group_id'], $me, $msg, $type, $reply, $extra, $ts]);
         }
@@ -265,6 +280,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt = $db->prepare("INSERT INTO messages (from_user, to_user, message, type, reply_to_id, extra_data, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)");
             $stmt->execute([$me, $_POST['to_user'], $msg, $type, $reply, $extra, $ts]);
         } else if (!empty($_POST['group_id'])) {
+            // Channel Permission Check
+            $gstmt = $db->prepare("SELECT owner_id, category FROM groups WHERE id = ?");
+            $gstmt->execute([$_POST['group_id']]);
+            $g = $gstmt->fetch();
+            if ($g && $g['category'] === 'channel' && $g['owner_id'] != $myId) {
+                echo json_encode(['status'=>'error','message'=>'Only the owner can post in this channel']); exit;
+            }
             $stmt = $db->prepare("INSERT INTO messages (group_id, from_user, message, type, reply_to_id, extra_data, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)");
             $stmt->execute([$_POST['group_id'], $me, $msg, $type, $reply, $extra, $ts]);
         }
@@ -275,12 +297,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // GROUPS
     if ($action === 'create_group') {
         $type = $input['type'];
+        $cat = $input['category'] ?? 'group';
         $code = ($type === 'public' || $type === 'discoverable') ? rand(100000, 999999) : null;
         $joinEnabled = ($type === 'private') ? 0 : 1;
         
         try {
-            $db->prepare("INSERT INTO groups (name, type, owner_id, join_code, created_at, join_enabled) VALUES (?, ?, ?, ?, ?, ?)")
-               ->execute([htmlspecialchars($input['name']), $type, $myId, $code, time(), $joinEnabled]);
+            $db->prepare("INSERT INTO groups (name, type, owner_id, join_code, created_at, join_enabled, category) VALUES (?, ?, ?, ?, ?, ?, ?)")
+               ->execute([htmlspecialchars($input['name']), $type, $myId, $code, time(), $joinEnabled, $cat]);
             $gid = $db->lastInsertId();
             $db->prepare("INSERT INTO group_members (group_id, user_id) VALUES (?, ?)")->execute([$gid, $myId]);
             echo json_encode(['status' => 'success']);
@@ -354,7 +377,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $db->prepare("UPDATE users SET last_seen = ? WHERE id = ?")->execute([time(), $myId]);
         // Cleanup old messages (1% chance)
-        if (rand(1, 100) === 1) $db->exec("DELETE FROM messages WHERE timestamp < " . (time() - 2592000));
+        if (rand(1, 100) === 1) {
+            $t24h = time() - 86400;
+            // 24 hours for everything - Exclude Discoverable Channels (Permanent)
+            $db->exec("DELETE FROM messages WHERE timestamp < $t24h AND (group_id IS NULL OR group_id NOT IN (SELECT id FROM groups WHERE category = 'channel' AND type = 'discoverable'))");
+        }
 
         // Self Profile
         $myProfile = $db->prepare("SELECT username, avatar, joined_at, bio FROM users WHERE id = ?");
@@ -372,7 +399,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $db->commit();
 
         // Groups
-        $groups = $db->prepare("SELECT g.id, g.name, g.type, g.join_code, gm.last_received_id FROM groups g JOIN group_members gm ON g.id=gm.group_id WHERE gm.user_id=?");
+        $groups = $db->prepare("SELECT g.id, g.name, g.type, g.join_code, g.category, g.owner_id, gm.last_received_id FROM groups g JOIN group_members gm ON g.id=gm.group_id WHERE gm.user_id=?");
         $groups->execute([$myId]);
         $myGroups = $groups->fetchAll();
     
@@ -740,6 +767,10 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
             <svg viewBox="0 0 24 24"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
             <div class="rail-badge" id="badge-groups"></div>
         </div>
+        <div class="rail-btn" id="nav-channels" onclick="switchTab('channels')">
+            <svg viewBox="0 0 24 24"><path d="M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14zM5 10h14v2H5zm0 4h14v2H5z"/></svg>
+            <div class="rail-badge" id="badge-channels"></div>
+        </div>
         <div class="rail-btn" id="nav-public" onclick="switchTab('public')">
             <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
         </div>
@@ -772,11 +803,22 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
             <div style="padding:20px 15px 5px 15px"><input type="text" id="group-search" class="form-input" placeholder="Search groups..." onkeyup="renderLists()" style="margin:0;padding:10px 15px;border-radius:20px"></div>
             <div class="panel-header" style="padding-top:5px;padding-bottom:5px;border-bottom:none">Groups 
                 <div style="display:flex;gap:5px">
-                <div class="btn-icon" onclick="discoverGroups()" title="Discover Groups">🌍</div>
+                <div class="btn-icon" onclick="discover('group')" title="Discover Groups">🌍</div>
                 <div class="btn-icon" onclick="createGroup()" title="Create Group">+</div>
                 </div></div>
             <div style="padding:0 15px 10px 15px"><button class="form-input" style="cursor:pointer;border-radius:20px;text-align:center;background:var(--bg);border:1px solid var(--border)" onclick="joinGroup()">Join via Code</button></div>
             <div class="list-area" id="list-groups">
+                <div class="tab-loader">
+                    <div class="rail-letters"><span>m</span><span>o</span><span>R</span><span>e</span></div>
+                    <div class="rail-dot"></div>
+                </div>
+            </div>
+        </div>
+        <div id="tab-channels" class="tab-content" style="display:none">
+            <div style="padding:20px 15px 5px 15px"><input type="text" id="channel-search" class="form-input" placeholder="Search channels..." onkeyup="renderLists()" style="margin:0;padding:10px 15px;border-radius:20px"></div>
+            <div class="panel-header" style="padding-top:5px;padding-bottom:5px;border-bottom:none">Channels <div style="display:flex;gap:5px"><div class="btn-icon" onclick="discover('channel')" title="Discover Channels">🌍</div><div class="btn-icon" onclick="createChannel()" title="Create Channel">+</div></div></div>
+            <div style="padding:0 15px 10px 15px"><button class="form-input" style="cursor:pointer;border-radius:20px;text-align:center;background:var(--bg);border:1px solid var(--border)" onclick="joinGroup()">Join via Code</button></div>
+            <div class="list-area" id="list-channels">
                 <div class="tab-loader">
                     <div class="rail-letters"><span>m</span><span>o</span><span>R</span><span>e</span></div>
                     <div class="rail-dot"></div>
@@ -1117,10 +1159,11 @@ async function poll(){
 function notify(id, text, type) {
     if(S.type === type && S.id == id && document.hasFocus()) return;
     if(S.notifs.some(n => n.id == id && n.text == text)) return;
-    let title = type=='dm'?id:(type=='public'?'Public Chat':(S.groups[id]?S.groups[id].name:'Group'));
+    let title = type=='dm'?id:(type=='public'?'Public Chat':(S.groups[id]?S.groups[id].name:(type=='channel'?'Channel':'Group')));
     S.notifs.unshift({id, type, text, title: title, time:new Date()});
     updateNotifUI();
-    document.getElementById(type=='dm'?'badge-chats':'badge-groups').style.display = 'block';
+    let badge = type=='dm'?'badge-chats':(type=='channel'?'badge-channels':'badge-groups');
+    if(document.getElementById(badge)) document.getElementById(badge).style.display = 'block';
 
     if(Notification.permission==='granted'){
         let opts={body:text,icon:'?action=icon',tag:'mw-'+id};
@@ -1149,7 +1192,7 @@ function openFromNotif(idx) {
     S.notifs.splice(idx, 1);
     updateNotifUI();
     toggleNotif(false);
-    switchTab(n.type == 'dm' ? 'chats' : (n.type=='public'?'public':'groups'));
+    switchTab(n.type == 'dm' ? 'chats' : (n.type=='public'?'public':(n.type=='channel'?'channels':'groups')));
     openChat(n.type, n.id);
 }
 
@@ -1181,7 +1224,7 @@ async function store(t,i,m){
     h.push(m); await save(t,i,h);
     if(S.id==i && S.type==t) {
         let prev = h.length>1 ? h[h.length-2] : null;
-        let show = (t=='public'||t=='group') && m.from_user!=ME && (!prev || prev.from_user!=m.from_user);
+        let show = (t=='public'||t=='group'||t=='channel') && m.from_user!=ME && (!prev || prev.from_user!=m.from_user);
         document.getElementById('msgs').appendChild(createMsgNode(m, show));
         scrollToBottom(false);
     }
@@ -1319,6 +1362,7 @@ function switchTab(t){
     document.getElementById('tab-'+t).style.display='block';
     if(t=='chats') document.getElementById('badge-chats').style.display='none';
     if(t=='groups') document.getElementById('badge-groups').style.display='none';
+    if(t=='channels') document.getElementById('badge-channels').style.display='none';
     document.getElementById('nav-panel').classList.remove('hidden');
     document.getElementById('main-view').classList.remove('active');
 }
@@ -1329,6 +1373,7 @@ async function renderLists(){
         let filter = document.getElementById('chat-search').value.toLowerCase();
         let chatFilter = document.getElementById('chat-search').value.toLowerCase();
         let groupFilter = document.getElementById('group-search') ? document.getElementById('group-search').value.toLowerCase() : '';
+        let channelFilter = document.getElementById('channel-search') ? document.getElementById('channel-search').value.toLowerCase() : '';
         let keys = (await dbOp('readonly', s => s.getAllKeys())) || [];
         for(let k of keys){
             if(k.startsWith('mw_dm_')){
@@ -1356,16 +1401,22 @@ async function renderLists(){
         }
         document.getElementById('list-chats').innerHTML=dh;
         let gh='';
+        let ch='';
         Object.values(S.groups).forEach(g=>{
-            if(filter && !g.name.toLowerCase().includes(filter)) return;
-            if(groupFilter && !g.name.toLowerCase().includes(groupFilter)) return;
+            let isChan = g.category === 'channel';
+            if(isChan && channelFilter && !g.name.toLowerCase().includes(channelFilter)) return;
+            if(!isChan && groupFilter && !g.name.toLowerCase().includes(groupFilter)) return;
+            
             let lock = S.e2ee[g.id] ? '<svg viewBox="0 0 24 24" width="14" style="vertical-align:middle;margin-left:4px;fill:var(--accent)"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-9-2c0-1.66 1.34-3 3-3s3 1.34 3 3v2H9V6zm9 14H6V10h12v10zm-6-3c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2z"/></svg>' : '';
-            gh+=`<div class="list-item ${S.id==g.id?'active':''}" onclick="openChat('group',${g.id})" oncontextmenu="onChatListContext(event, 'group', ${g.id})">
-                <div class="avatar">#</div>
+            let html = `<div class="list-item ${S.id==g.id?'active':''}" onclick="openChat('${isChan?'channel':'group'}',${g.id})" oncontextmenu="onChatListContext(event, '${isChan?'channel':'group'}', ${g.id})">
+                <div class="avatar">${isChan?'📢':'#'}</div>
                 <div><div style="font-weight:bold;display:flex;align-items:center">${g.name} ${lock}</div><div style="font-size:0.8em;color:#888">${g.type}</div></div>
             </div>`;
+            
+            if(isChan) ch += html; else gh += html;
         });
         document.getElementById('list-groups').innerHTML=gh;
+        document.getElementById('list-channels').innerHTML=ch;
         document.getElementById('online-count').innerText=S.online.length;
     } catch(e) { console.error("RenderLists error", e); }
 }
@@ -1389,21 +1440,25 @@ async function openChat(t,i){
     document.getElementById('main-view').classList.add('active');
         document.getElementById('nav-panel').classList.add('hidden');
     let tit=i, sub='', av='';
+    let canPost = true;
     if(t=='dm'){
         let ou=S.online.find(x=>x.username==i);
         sub=ou?(ou.bio||'Online'):'Offline'; av=ou?ou.avatar:'';
         if(av) document.getElementById('chat-av').style.backgroundImage=`url('${av}')`;
         document.getElementById('chat-av').innerText=av?'':i[0];
-    } else if(t=='group') {
-        tit=S.groups[i].name; sub='Group';
-        document.getElementById('chat-av').innerText='#';
+    } else if(t=='group' || t=='channel') {
+        let g = S.groups[i];
+        tit=g.name; sub=t=='channel'?'Channel':'Group';
+        document.getElementById('chat-av').innerText=t=='channel'?'📢':'#';
+        if(t=='channel' && g.owner_id != <?php echo $_SESSION['uid']; ?>) canPost = false;
     } else if(t=='public') {
         tit="Public Chat"; sub="Global Room (5m TTL)";
         document.getElementById('chat-av').innerText='P';
     }
     document.getElementById('chat-title').innerText=tit;
     document.getElementById('chat-sub').innerText=sub;
-    document.getElementById('txt').placeholder = (t=='dm' && S.e2ee[S.id]) ? "Type an encrypted message..." : "Type a message...";
+    document.getElementById('txt').placeholder = (t=='dm' && S.e2ee[S.id]) ? "Type an encrypted message..." : (canPost ? "Type a message..." : "Only owner can post");
+    document.getElementById('input-box').style.visibility = canPost ? 'visible' : 'hidden';
     setTimeout(()=>document.getElementById('txt').focus(), 50);
     
     if(t=='dm'){ let h=await get('dm',i); let last=h.filter(x=>x.from_user==i).pop(); if(last && last.timestamp>lastRead){ lastRead=last.timestamp; req('send',{to_user:i,type:'read',extra:last.timestamp}); } }
@@ -1468,7 +1523,7 @@ async function renderChat(){
             c.appendChild(sep);
             lastDate = dateStr;
         }
-        let show=(S.type=='public'||S.type=='group') && m.from_user!=ME && m.from_user!=last;
+        let show=(S.type=='public'||S.type=='group'||S.type=='channel') && m.from_user!=ME && m.from_user!=last;
         c.appendChild(createMsgNode(m, show));
         last=m.from_user;
     });
@@ -1508,7 +1563,7 @@ async function send(){
 
     // Prepare Network Request
     let load = { message: txt, type: 'text', reply_to: S.reply, timestamp: ts };
-    if(S.type=='dm') load.to_user=S.id; else if(S.type=='group') load.group_id=S.id; else if(S.type=='public') load.group_id=-1;
+    if(S.type=='dm') load.to_user=S.id; else if(S.type=='group'||S.type=='channel') load.group_id=S.id; else if(S.type=='public') load.group_id=-1;
 
     try {
         if(S.type=='dm' && S.e2ee[S.id]){
@@ -1598,7 +1653,7 @@ async function ctxAction(act, arg) {
 
 async function sendReact(ts,e){
     let ld={message:e,type:'react',extra:ts};
-    if(S.type=='dm')ld.to_user=S.id; else if(S.type=='group') ld.group_id=S.id; else if(S.type=='public') ld.group_id=-1;
+    if(S.type=='dm')ld.to_user=S.id; else if(S.type=='group'||S.type=='channel') ld.group_id=S.id; else if(S.type=='public') ld.group_id=-1;
     req('send', ld);
     let h = await get(S.type,S.id);
     let m=h.find(x=>x.timestamp==ts);
@@ -1608,7 +1663,7 @@ async function sendReact(ts,e){
 async function deleteMsg(){
     if(!S.reply)return;
     let ld={message:'DEL', type:'delete', extra:S.reply};
-    if(S.type=='dm')ld.to_user=S.id; else if(S.type=='group') ld.group_id=S.id; else if(S.type=='public') ld.group_id=-1;
+    if(S.type=='dm')ld.to_user=S.id; else if(S.type=='group'||S.type=='channel') ld.group_id=S.id; else if(S.type=='public') ld.group_id=-1;
     req('send', ld);
     await removeMsg(S.type,S.id,S.reply); cancelReply();
 }
@@ -1685,7 +1740,7 @@ async function uploadFile(inp){
     let ts = Math.floor(Date.now()/1000);
     fd.append('timestamp', ts);
     if(S.type=='dm') fd.append('to_user', S.id);
-    else if(S.type=='group') fd.append('group_id', S.id);
+    else if(S.type=='group'||S.type=='channel') fd.append('group_id', S.id);
     else fd.append('group_id', -1);
 
     fetch('?action=upload_msg', { method:'POST', body:fd, headers:{'X-CSRF-Token': CSRF_TOKEN} })
@@ -1714,27 +1769,31 @@ function downloadFile(data, name){
 function cancelReply(){ S.reply=null; document.getElementById('reply-ui').style.display='none'; document.getElementById('del-btn').style.display='none'; }
 function promptChat(){ promptModal("New Chat", "Username:", async (u)=>{ if(u){ let ex=await get('dm',u); if(!ex.length) await save('dm',u,[]); openChat('dm',u); switchTab('chats'); }}); }
 
-function createGroup(){ 
-    alertModal("Create Group", "");
+function createGroup(){ createEntity('group'); }
+function createChannel(){ createEntity('channel'); }
+
+function createEntity(type){ 
+    let label = type=='channel'?'Channel':'Group';
+    alertModal("Create "+label, "");
     document.getElementById('modal-ok').style.display='none';
     document.getElementById('modal-cancel').style.display='block';
     document.getElementById('modal-body').innerHTML = `
-        <input id="ng-name" class="form-input" placeholder="Group Name">
+        <input id="ng-name" class="form-input" placeholder="${label} Name">
         <select id="ng-type" class="form-select">
             <option value="public">Public (Code)</option>
             <option value="discoverable">Discoverable (Listed)</option>
             <option value="private">Private (Invite Only)</option>
         </select>
-        <button class="btn-primary" style="width:100%;margin-top:10px" onclick="doCreateGroup()">Create</button>
+        <button class="btn-primary" style="width:100%;margin-top:10px" onclick="doCreateGroup('${type}')">Create</button>
     `;
 }
-function doCreateGroup(){
+function doCreateGroup(cat){
     let n=document.getElementById('ng-name').value;
     let t=document.getElementById('ng-type').value;
     let btn=document.querySelector('#modal-body button');
     if(n) {
         btn.disabled=true; btn.innerText='Creating...';
-        req('create_group',{name:n,type:t}).then(r=>r.json()).then(d=>{
+        req('create_group',{name:n,type:t,category:cat}).then(r=>r.json()).then(d=>{
         if(d.status=='success'){ document.getElementById('app-modal').style.display='none'; renderLists(); }
         else { alert(d.message||'Error'); btn.disabled=false; btn.innerText='Create'; }
     }).catch(()=>{ alert('Connection failed'); btn.disabled=false; btn.innerText='Create'; });
@@ -1760,7 +1819,7 @@ function doJoinGroup(){
 
 function saveSettings(){ req('update_profile',{bio:document.getElementById('set-bio').value,avatar:document.getElementById('set-av').value,new_password:document.getElementById('set-pw').value}); alertModal("Settings", "Profile updated."); }
 
-async function discoverGroups(){ startProg(); alertModal("Discover Groups", '<div class="tab-loader" style="min-height:150px"><div class="rail-letters"><span>m</span><span>o</span><span>R</span><span>e</span></div><div class="rail-dot"></div></div>'); let r=await fetch('?action=get_discoverable_groups'); endProg(); let d=await r.json(); let h='<div style="max-height:300px;overflow-y:auto">'; d.groups.forEach(g=>{ h+=`<div style="padding:10px;border-bottom:1px solid #333;display:flex;justify-content:space-between;align-items:center"><div><b>${g.name}</b><br><span style="color:#888;font-size:0.8rem">Code: ${g.join_code}</span></div><button class="btn-sec" onclick="req('join_group',{code:'${g.join_code}'}).then(()=>{document.getElementById('app-modal').style.display='none';renderLists()})">Join</button></div>`; }); h+='</div>'; document.getElementById('modal-body').innerHTML=h; }
+async function discover(cat){ startProg(); alertModal("Discover "+(cat=='channel'?'Channels':'Groups'), '<div class="tab-loader" style="min-height:150px"><div class="rail-letters"><span>m</span><span>o</span><span>R</span><span>e</span></div><div class="rail-dot"></div></div>'); let r=await fetch('?action=get_discoverable_groups&cat='+cat); endProg(); let d=await r.json(); let h='<div style="max-height:300px;overflow-y:auto">'; d.items.forEach(g=>{ h+=`<div style="padding:10px;border-bottom:1px solid #333;display:flex;justify-content:space-between;align-items:center"><div><b>${g.name}</b><br><span style="color:#888;font-size:0.8rem">Code: ${g.join_code}</span></div><button class="btn-sec" onclick="req('join_group',{code:'${g.join_code}'}).then(()=>{document.getElementById('app-modal').style.display='none';renderLists()})">Join</button></div>`; }); h+='</div>'; document.getElementById('modal-body').innerHTML=h; }
 
 async function showProfilePopup() {
     if(S.type === 'dm') {
@@ -1781,7 +1840,7 @@ async function showProfilePopup() {
             ${!S.e2ee[S.id] ? `<button class="btn-sec" style="margin-top:15px;width:100%" onclick="startE2EE();document.getElementById('app-modal').style.display='none'">Enable End-to-End Encryption</button>` : `<div style="margin-top:15px;color:var(--accent)">🔒 Encrypted</div>`}
         </div>`;
         alertModal("Profile", ""); document.getElementById('modal-body').innerHTML = html;
-    } else if (S.type === 'group') {
+    } else if (S.type === 'group' || S.type === 'channel') {
         startProg();
         let r = await fetch('?action=get_group_details&id='+S.id);
         endProg();
@@ -1790,9 +1849,9 @@ async function showProfilePopup() {
         
         let html = `<div style="text-align:center;margin-bottom:15px">
             <b>${d.group.name}</b><br>
-            <span style="color:#888;font-size:0.8rem">${d.group.type} ${d.group.join_code ? '| Code: '+d.group.join_code : ''}</span><br>
+            <span style="color:#888;font-size:0.8rem">${d.group.category=='channel'?'Channel':'Group'} - ${d.group.type} ${d.group.join_code ? '| Code: '+d.group.join_code : ''}</span><br>
             ${d.is_owner && d.group.type=='private' ? `<button class="btn-sec" style="font-size:0.7rem;margin-top:5px" onclick="groupSettings(${S.id})">Manage Invite</button>` : ''}
-            ${!S.e2ee[S.id] ? `<button class="btn-sec" style="margin-top:10px;width:100%" onclick="startWEncrypt();document.getElementById('app-modal').style.display='none'">Enable WEncrypt</button>` : `<div style="margin-top:10px;color:var(--accent)">🔒 WEncrypt Active</div>`}
+            ${!S.e2ee[S.id] && d.group.category!='channel' ? `<button class="btn-sec" style="margin-top:10px;width:100%" onclick="startWEncrypt();document.getElementById('app-modal').style.display='none'">Enable WEncrypt</button>` : ``}
         </div>
         <div style="max-height:200px;overflow-y:auto;text-align:left;margin-bottom:15px;background:#222;padding:10px;border-radius:8px">
             <div style="font-size:0.8rem;color:#aaa;margin-bottom:5px">Members (${d.members.length})</div>
@@ -1878,7 +1937,7 @@ function stopRec(send){
             let r=new FileReader();
             r.onload=async ()=>{ 
                 let ts=Math.floor(Date.now()/1000);
-                let ld={message:r.result,type:'audio',timestamp:ts}; if(S.type=='dm')ld.to_user=S.id; else if(S.type=='group') ld.group_id=S.id; else if(S.type=='public') ld.group_id=-1; req('send',ld); await store(S.type,S.id,{from_user:ME,message:r.result,type:'audio',timestamp:ts}); 
+                let ld={message:r.result,type:'audio',timestamp:ts}; if(S.type=='dm')ld.to_user=S.id; else if(S.type=='group'||S.type=='channel') ld.group_id=S.id; else if(S.type=='public') ld.group_id=-1; req('send',ld); await store(S.type,S.id,{from_user:ME,message:r.result,type:'audio',timestamp:ts}); 
             };
             r.readAsDataURL(b);
         }

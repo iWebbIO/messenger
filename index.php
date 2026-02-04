@@ -1194,15 +1194,15 @@ async function renderLists(){
                 if(filter && !u.toLowerCase().includes(filter)) continue;
                 if(chatFilter && !u.toLowerCase().includes(chatFilter)) continue;
                 let h = await get('dm', u);
-                let sec=S.e2ee[u]?' e2ee-on':'';
+                let lock = S.e2ee[u] ? '<svg viewBox="0 0 24 24" width="14" style="vertical-align:middle;margin-left:4px;fill:var(--accent)"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-9-2c0-1.66 1.34-3 3-3s3 1.34 3 3v2H9V6zm9 14H6V10h12v10zm-6-3c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2z"/></svg>' : '';
                 let last=h.length?h[h.length-1].message:'Start chatting';
                 if(last.length>30)last=last.substring(0,30)+'...';
                 let ou=S.online.find(x=>x.username==u);
                 let av=ou?ou.avatar:'';
                 dh+=`<div class="list-item ${S.id==u?'active':''}" onclick="openChat('dm','${u}')" oncontextmenu="onChatListContext(event, 'dm', '${u}')">
                     <div class="avatar" style="background-image:url('${av}')">${av?'':u[0].toUpperCase()}</div>
-                    <div style="flex:1"><div style="font-weight:bold">${u} ${ou?'<span style="color:#0f0;font-size:0.8em">●</span>':''}</div><div style="font-size:0.8em;color:#888">${last}</div></div>
-                    <div class="btn-icon${sec}"><svg viewBox="0 0 24 24" width="16"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-9-2c0-1.66 1.34-3 3-3s3 1.34 3 3v2H9V6zm9 14H6V10h12v10zm-6-3c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2z"/></svg></div></div>`;
+                    <div style="flex:1"><div style="font-weight:bold;display:flex;align-items:center">${u} ${lock} ${ou?'<span style="color:#0f0;font-size:0.8em;margin-left:4px">●</span>':''}</div><div style="font-size:0.8em;color:#888">${last}</div></div>
+                    </div>`;
             }
         }
         document.getElementById('list-chats').innerHTML=dh;
@@ -1210,9 +1210,10 @@ async function renderLists(){
         Object.values(S.groups).forEach(g=>{
             if(filter && !g.name.toLowerCase().includes(filter)) return;
             if(groupFilter && !g.name.toLowerCase().includes(groupFilter)) return;
+            let lock = S.e2ee[g.id] ? '<svg viewBox="0 0 24 24" width="14" style="vertical-align:middle;margin-left:4px;fill:var(--accent)"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-9-2c0-1.66 1.34-3 3-3s3 1.34 3 3v2H9V6zm9 14H6V10h12v10zm-6-3c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2z"/></svg>' : '';
             gh+=`<div class="list-item ${S.id==g.id?'active':''}" onclick="openChat('group',${g.id})" oncontextmenu="onChatListContext(event, 'group', ${g.id})">
                 <div class="avatar">#</div>
-                <div><div style="font-weight:bold">${g.name}</div><div style="font-size:0.8em;color:#888">${g.type}</div></div>
+                <div><div style="font-weight:bold;display:flex;align-items:center">${g.name} ${lock}</div><div style="font-size:0.8em;color:#888">${g.type}</div></div>
             </div>`;
         });
         document.getElementById('list-groups').innerHTML=gh;
@@ -1221,6 +1222,7 @@ async function renderLists(){
 }
 
 async function openChat(t,i){
+    document.getElementById('we-overlay').style.display='none';
     if(S.id!=i) lastRead=0;
     S.type=t; S.id=i;
     renderLists();

@@ -1,5 +1,5 @@
 <?php
-header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none';");
+header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com; frame-ancestors 'none';");
 session_start();
 if (empty($_SESSION['csrf_token'])) {
     $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
@@ -117,7 +117,7 @@ if ($action === 'icon') {
 }
 if ($action === 'sw') {
     header('Content-Type: application/javascript');
-    echo "const CACHE='mw-v1';self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['index.php','?action=icon'])));self.skipWaiting()});self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('fetch',e=>{if(e.request.method!='GET')return;e.respondWith(fetch(e.request).catch(()=>caches.match(e.request)))});self.addEventListener('notificationclick',e=>{e.notification.close();e.waitUntil(clients.matchAll({type:'window',includeUncontrolled:true}).then(cl=>{for(let c of cl){if(c.url&&'focus'in c)return c.focus();}if(clients.openWindow)return clients.openWindow('index.php');}));});";
+    echo "const CACHE='mw-v1';self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['index.php','?action=icon'])));self.skipWaiting()});self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('fetch',e=>{if(e.request.method!='GET')return;e.respondWith(fetch(e.request).catch(()=>caches.match(e.request).then(r=>r||new Response('',{status:404}))))});self.addEventListener('notificationclick',e=>{e.notification.close();e.waitUntil(clients.matchAll({type:'window',includeUncontrolled:true}).then(cl=>{for(let c of cl){if(c.url&&'focus'in c)return c.focus();}if(clients.openWindow)return clients.openWindow('index.php');}));});";
     exit;
 }
 
@@ -418,26 +418,83 @@ if (!isset($_SESSION['user'])) {
 <!DOCTYPE html>
 <html lang="en">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>moreweb Messenger - Login</title>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>moreweb Messenger - Login</title>
 <link rel="manifest" href="?action=manifest">
 <meta name="theme-color" content="#0f0518">
 <link rel="icon" href="?action=icon" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@100;300;400;700&display=swap" rel="stylesheet">
 <style>
 body{background:#0f0518;color:#eee;font-family:sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}
 .box{background:#1a0b2e;padding:2rem;border-radius:12px;width:300px;text-align:center;box-shadow:0 10px 30px rgba(0,0,0,0.5);border:1px solid #2f1b42}
 input{width:100%;padding:12px;margin:10px 0;background:#261038;border:1px solid #2f1b42;color:#fff;border-radius:6px;box-sizing:border-box}
 button{width:100%;padding:12px;background:#a855f7;color:#fff;border:none;border-radius:6px;font-weight:bold;cursor:pointer}
+    :root { --dark-bg: #000000; --neon-accent: #bf00ff; --text-heading: #ffffff; }
+    body{background:#0f0518;color:#eee;font-family:'Poppins', sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;overflow:hidden}
+    
+    .box{background:#1a0b2e;padding:2rem;border-radius:12px;width:300px;text-align:center;box-shadow:0 10px 30px rgba(0,0,0,0.5);border:1px solid #2f1b42;position:relative;z-index:10}
+    input{width:100%;padding:12px;margin:10px 0;background:#261038;border:1px solid #2f1b42;color:#fff;border-radius:6px;box-sizing:border-box;font-family:inherit}
+    button{width:100%;padding:12px;background:#a855f7;color:#fff;border:none;border-radius:6px;font-weight:bold;cursor:pointer;font-family:inherit}
+    
 @keyframes gradientBG { 0% {background-position: 0% 50%;} 50% {background-position: 100% 50%;} 100% {background-position: 0% 50%;} }
 #login-bg {
     position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1;
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 0;
     background: linear-gradient(-45deg, #0f0518, #3b0764, #6b21a8, #0f0518);
     background-size: 400% 400%;
     animation: gradientBG 3s ease infinite;
     opacity: 0; transition: opacity 1.5s ease-in-out;
 }
 body.login-process #login-bg { opacity: 1; }
+
+    /* Splash Screen */
+    .splash-screen {
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background-color: #000000; z-index: 9999;
+        display: flex; justify-content: center; align-items: center;
+        animation: screenFadeOut 0.5s ease-in-out 2.4s forwards;
+        pointer-events: none;
+    }
+    .splash-screen .word {
+        color: #FFFFFF; font-family: 'Poppins', sans-serif; font-weight: 100; font-size: clamp(4rem, 15vw, 10rem);
+        display: grid; grid-template-columns: auto auto; justify-items: center;
+        line-height: 0.8; gap: 0.15em; text-shadow: 0 0 30px var(--neon-accent); direction: ltr;
+        animation: fadeWordOut 0.3s cubic-bezier(0.55, 0.085, 0.68, 0.53) 1.0s forwards;
+    }
+    .splash-screen .word span { opacity: 0; position: relative; }
+    .splash-screen .message {
+        position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        text-align: center; width: 100%; pointer-events: none;
+    }
+    .splash-screen .message span { opacity: 0; line-height: 1.1; display: block; }
+    .splash-screen .line1 { font-size: clamp(3rem, 8vw, 6rem); font-weight: 400; color: var(--text-heading); margin-bottom: 0.5rem; }
+    .splash-screen .line2 { font-size: clamp(3rem, 8vw, 6rem); font-weight: 700; color: var(--neon-accent); text-shadow: 0 0 40px rgba(191, 0, 255, 0.4); }
+
+    @keyframes letterAppear { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
+    @keyframes fadeWordOut { from { opacity: 1; transform: scale(1); filter: blur(0); } to { opacity: 0; transform: scale(1.1); filter: blur(10px); } }
+    @keyframes messageAppear { from { opacity: 0; transform: translateY(40px) scale(0.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
+    @keyframes screenFadeOut { to { opacity: 0; visibility: hidden; } }
+
+    .splash-screen .word span:nth-child(1) { animation: letterAppear 0.3s ease-out 0.05s forwards; }
+    .splash-screen .word span:nth-child(2) { animation: letterAppear 0.3s ease-out 0.15s forwards; }
+    .splash-screen .word span:nth-child(3) { animation: letterAppear 0.3s ease-out 0.25s forwards; }
+    .splash-screen .word span:nth-child(4) { animation: letterAppear 0.3s ease-out 0.30s forwards; }
+    .splash-screen .message .line1 { animation: messageAppear 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) 1.2s forwards; }
+    .splash-screen .message .line2 { animation: messageAppear 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) 1.35s forwards; }
 </style>
 </head>
 <body>
+
+<div class="splash-screen">
+    <div class="word"><span>m</span><span>o</span><span>r</span><span>e</span></div>
+    <div class="message"><span class="line1">Beyond</span><span class="line2">The Web</span></div>
+</div>
+
 <div id="login-bg"></div>
 <div class="box">
     <h2 id="ttl">moreweb Messenger</h2><div id="err" style="color:#f55;display:none;margin-bottom:10px"></div>
@@ -480,7 +537,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
 <link rel="manifest" href="?action=manifest">
 <meta name="theme-color" content="#0f0518">
 <link rel="icon" href="?action=icon" type="image/svg+xml">
-<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@100;400;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@100;300;400;700&display=swap" rel="stylesheet">
 <title>moreweb Messenger</title>
 <style>
     :root { --bg:#0f0518; --rail:#0b0b0b; --panel:#1a0b2e; --border:#2f1b42; --accent:#a855f7; --text:#e0e0e0; --msg-in:#261038; --msg-out:#581c87; --sb-thumb:rgba(255,255,255,0.5); --sb-hover:rgba(255,255,255,0.7); --input-bg:#333; --pattern:#222; --hover-overlay:rgba(255,255,255,0.05); }
@@ -495,7 +552,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
     .light-mode .ctx-menu { background:#fff; border-color:#ccc; }
 
     .e2ee-on { color: var(--accent); }
-    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; background:var(--bg); color:var(--text); height:100vh; display:flex; overflow:hidden; }
+    body { margin:0; font-family:'Poppins', sans-serif; background:var(--bg); color:var(--text); height:100vh; display:flex; overflow:hidden; }
     
     /* Custom Scrollbar */
     ::-webkit-scrollbar { width: 10px; height: 10px; }

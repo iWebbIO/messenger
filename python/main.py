@@ -36,7 +36,8 @@ def init_db():
             type TEXT,
             owner_id INTEGER,
             join_code TEXT,
-            created_at INTEGER
+            created_at INTEGER,
+            category TEXT DEFAULT 'group'
         )""")
         db.execute("""CREATE TABLE IF NOT EXISTS group_members (
             group_id INTEGER,
@@ -61,6 +62,11 @@ def init_db():
         db.execute("CREATE INDEX IF NOT EXISTS idx_msg_group ON messages(group_id)")
         db.execute("CREATE INDEX IF NOT EXISTS idx_msg_ts ON messages(timestamp)")
         db.commit()
+        
+        try:
+            db.execute("ALTER TABLE groups ADD COLUMN category TEXT DEFAULT 'group'")
+            db.execute("ALTER TABLE groups ADD COLUMN join_enabled INTEGER DEFAULT 1")
+        except sqlite3.OperationalError: pass
 
 init_db()
 
@@ -106,6 +112,28 @@ def index():
         with get_db() as db:
             row = db.execute("SELECT username, avatar, bio, joined_at, last_seen FROM users WHERE username = ?", (u,)).fetchone()
             return jsonify(dict(row) if row else {'status': 'error'})
+
+    if action == 'get_discoverable_groups':
+        cat = request.args.get('cat', 'group')
+        with get_db() as db:
+            rows = db.execute("SELECT id, name, type, join_code FROM groups WHERE type = 'discoverable' AND category = ? ORDER BY created_at DESC LIMIT 50", (cat,)).fetchall()
+            return jsonify({'status': 'success', 'items': [dict(r) for r in rows]})
+
+    if action == 'get_group_details':
+        if 'user' not in session: return jsonify({'status': 'error'})
+        gid = request.args.get('id')
+        my_id = session['uid']
+        with get_db() as db:
+            mem = db.execute("SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?", (gid, my_id)).fetchone()
+            if not mem: return jsonify({'status': 'error', 'message': 'Not a member'})
+            
+            grp = db.execute("SELECT * FROM groups WHERE id = ?", (gid,)).fetchone()
+            mems = db.execute("SELECT u.id, u.username, u.avatar, u.last_seen, u.public_key FROM group_members gm JOIN users u ON gm.user_id = u.id WHERE gm.group_id = ?", (gid,)).fetchall()
+            
+            return jsonify({
+                'status': 'success', 'group': dict(grp), 
+                'members': [dict(m) for m in mems], 'is_owner': grp['owner_id'] == my_id
+            })
 
     # --- AUTH ACTIONS ---
     if request.method == 'POST':
@@ -173,6 +201,10 @@ def index():
                 db.execute("INSERT INTO messages (from_user, to_user, message, type, reply_to_id, extra_data, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)",
                            (me, data['to_user'], msg, mtype, reply, extra, ts))
             elif 'group_id' in data:
+                # Channel Check
+                grp = db.execute("SELECT owner_id, category FROM groups WHERE id = ?", (data['group_id'],)).fetchone()
+                if grp and grp['category'] == 'channel' and grp['owner_id'] != my_id:
+                    return jsonify({'status': 'error', 'message': 'Only owner can post'})
                 db.execute("INSERT INTO messages (group_id, from_user, message, type, reply_to_id, extra_data, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)",
                            (data['group_id'], me, msg, mtype, reply, extra, ts))
             db.commit()
@@ -195,15 +227,21 @@ def index():
                 db.execute("INSERT INTO messages (from_user, to_user, message, type, reply_to_id, extra_data, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)",
                            (me, request.form.get('to_user'), b64, mtype, reply, extra, ts))
             elif request.form.get('group_id'):
+                grp = db.execute("SELECT owner_id, category FROM groups WHERE id = ?", (request.form.get('group_id'),)).fetchone()
+                if grp and grp['category'] == 'channel' and grp['owner_id'] != my_id:
+                    return jsonify({'status': 'error', 'message': 'Only owner can post'})
                 db.execute("INSERT INTO messages (group_id, from_user, message, type, reply_to_id, extra_data, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)",
                            (request.form.get('group_id'), me, b64, mtype, reply, extra, ts))
             db.commit()
             return jsonify({'status': 'success'})
 
         if action == 'create_group':
-            code = secrets.randbelow(899999) + 100000 if data.get('type') == 'public' else None
-            cur = db.execute("INSERT INTO groups (name, type, owner_id, join_code, created_at) VALUES (?, ?, ?, ?, ?)",
-                       (data.get('name'), data.get('type'), my_id, str(code) if code else None, int(time.time())))
+            gtype = data.get('type')
+            cat = data.get('category', 'group')
+            code = str(secrets.randbelow(900000) + 100000) if gtype in ['public', 'discoverable'] else None
+            join_enabled = 0 if gtype == 'private' else 1
+            cur = db.execute("INSERT INTO groups (name, type, owner_id, join_code, created_at, join_enabled, category) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                       (data.get('name'), gtype, my_id, code, int(time.time()), join_enabled, cat))
             gid = cur.lastrowid
             db.execute("INSERT INTO group_members (group_id, user_id) VALUES (?, ?)", (gid, my_id))
             db.commit()
@@ -231,7 +269,8 @@ def index():
             
             # Cleanup old messages (1% chance)
             if secrets.randbelow(100) == 0:
-                db.execute("DELETE FROM messages WHERE timestamp < ?", (int(time.time()) - 2592000,))
+                t24h = int(time.time()) - 86400
+                db.execute("DELETE FROM messages WHERE timestamp < ? AND (group_id IS NULL OR group_id NOT IN (SELECT id FROM groups WHERE category = 'channel' AND type = 'discoverable'))", (t24h,))
             
             # Profile
             my_profile = db.execute("SELECT username, avatar, joined_at, bio FROM users WHERE id = ?", (my_id,)).fetchone()
@@ -244,7 +283,7 @@ def index():
             
             # Groups
             groups = db.execute("""
-                SELECT g.id, g.name, g.type, g.join_code, gm.last_received_id 
+                SELECT g.id, g.name, g.type, g.join_code, g.category, g.owner_id, gm.last_received_id 
                 FROM groups g 
                 JOIN group_members gm ON g.id = gm.group_id 
                 WHERE gm.user_id = ?
@@ -284,7 +323,7 @@ def index():
                 'typing': [u['username'] for u in typing]
             })
 
-    return render_template_string(APP_HTML, username=me, csrf_token=session['csrf_token'])
+    return render_template_string(APP_HTML, username=me, csrf_token=session['csrf_token'], uid=my_id)
 
 LOGIN_HTML = """
 <!DOCTYPE html>
@@ -310,15 +349,18 @@ button{width:100%;padding:12px;background:#00a884;color:#fff;border:none;border-
 <script>
 const CSRF_TOKEN = "{{ csrf_token }}";
 let reg=false;
+function toggleMode() { reg = !reg; document.getElementById('ttl').innerText = reg ? 'Create Account' : 'moreweb Messenger'; document.querySelector('button').innerText = reg ? 'Sign Up' : 'Sign In'; document.getElementById('err').style.display = 'none'; }
 async function sub(){
-    let u=document.getElementById('u').value,p=document.getElementById('p').value;
+    let u=document.getElementById('u').value.trim(),p=document.getElementById('p').value;
+    if(!u||!p){let e=document.getElementById('err');e.innerText="Please fill in all fields";e.style.display='block';return;}
+    document.body.classList.add('login-process');
     let r=await fetch('?action='+(reg?'register':'login'),{
         method:'POST',
         headers: {'Content-Type': 'application/json', 'X-CSRF-Token': CSRF_TOKEN},
         body:JSON.stringify({username:u,password:p})
     });
     let d=await r.json();
-    if(d.status=='success')location.reload();else{let e=document.getElementById('err');e.innerText=d.message;e.style.display='block'}
+    if(d.status=='success')location.reload();else{document.body.classList.remove('login-process');let e=document.getElementById('err');e.innerText=d.message;e.style.display='block';}
 }
 if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
 </script></body></html>
@@ -331,12 +373,13 @@ APP_HTML = """
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <link rel="manifest" href="?action=manifest">
-<meta name="theme-color" content="#121212">
+<meta name="theme-color" content="#0f0518">
 <link rel="icon" href="?action=icon" type="image/svg+xml">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@100;300;400;700&display=swap" rel="stylesheet">
 <title>moreweb Messenger</title>
 <style>
-    :root { --bg:#121212; --rail:#0b0b0b; --panel:#1e1e1e; --border:#2a2a2a; --accent:#00a884; --text:#e0e0e0; --msg-in:#2c2c2c; --msg-out:#005c4b; }
-    .light-mode { --bg:#ffffff; --rail:#f0f0f0; --panel:#f5f5f5; --border:#ddd; --text:#111; --msg-in:#fff; --msg-out:#d9fdd3; }
+    :root { --bg:#0f0518; --rail:#0b0b0b; --panel:#1a0b2e; --border:#2f1b42; --accent:#a855f7; --text:#e0e0e0; --msg-in:#261038; --msg-out:#581c87; --sb-thumb:rgba(255,255,255,0.5); --sb-hover:rgba(255,255,255,0.7); --input-bg:#333; --pattern:#222; --hover-overlay:rgba(255,255,255,0.05); }
+    .light-mode { --bg:#ffffff; --rail:#f0f0f0; --panel:#f5f5f5; --border:#ddd; --text:#111; --msg-in:#fff; --msg-out:#f3e8ff; --sb-thumb:rgba(0,0,0,0.4); --sb-hover:rgba(0,0,0,0.6); --input-bg:#fff; --pattern:#e5e5e5; --hover-overlay:rgba(0,0,0,0.05); }
     .light-mode .rail-btn { color:#555; }
     .light-mode .rail-btn:hover { background:#e0e0e0; color:#000; }
     .light-mode .list-item:hover { background:#f0f0f0; }
@@ -345,9 +388,12 @@ APP_HTML = """
     .light-mode .msg-meta { color:#777; }
     .light-mode .reply-ctx { background:#eee; color:#333; }
     .light-mode .ctx-menu { background:#fff; border-color:#ccc; }
-
-    .e2ee-on { color: #00a884; }
-    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; background:var(--bg); color:var(--text); height:100vh; display:flex; overflow:hidden; }
+    .e2ee-on { color: var(--accent); }
+    body { margin:0; font-family:'Poppins', sans-serif; background:var(--bg); color:var(--text); height:100vh; display:flex; overflow:hidden; }
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background-color: var(--sb-thumb); border-radius: 5px; border: 1px solid transparent; background-clip: content-box; }
+    ::-webkit-scrollbar-thumb:hover { background-color: var(--sb-hover); }
     
     /* Layout */
     .app-container { display:flex; width:100%; height:100%; }
@@ -1025,7 +1071,7 @@ function createMsgNode(m, showSender){
 
     let txt=esc(m.message);
     if(m.type=='image') txt=`<img src="${m.message}" onclick="window.open(this.src)" onload="scrollToBottom(false)">`;
-    else if(m.type=='audio') txt=`<audio controls src="${m.message}"></audio>`;
+    else if(m.type=='audio') txt=`<div class="audio-player"><button class="play-btn" onclick="playAudio(this)"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button><div class="audio-progress" onclick="seekAudio(this, event)"><div class="audio-bar"></div></div><div class="audio-time">0:00</div><audio src="${m.message}" style="display:none" onloadedmetadata="this.parentElement.querySelector('.audio-time').innerText=formatTime(this.duration)"></audio></div>`;
     else if(m.type=='file') {
         let fname = esc(m.extra_data || 'file');
         let safeName = (m.extra_data || 'file').replace(/'/g, "\\'");
@@ -1056,17 +1102,27 @@ function createMsgNode(m, showSender){
 }
 
 async function renderChat(){
-    let c=document.getElementById('msgs'); c.innerHTML='';
     let h = await get(S.type,S.id);
-    let last=null;
+    let c=document.getElementById('msgs'); c.innerHTML='';
+    let last=null, lastDate=null;
     h.forEach(m=>{
-        let show=(S.type=='public'||S.type=='group') && m.from_user!=ME && m.from_user!=last;
+        let d = new Date(m.timestamp*1000);
+        let dateStr = d.toLocaleDateString();
+        if(dateStr !== lastDate) {
+            let sep = document.createElement('div');
+            sep.style.cssText = "text-align:center;font-size:0.8rem;color:#666;margin:10px 0;position:sticky;top:0;z-index:5;";
+            sep.innerHTML = `<span style="background:var(--panel);padding:4px 10px;border-radius:10px;border:1px solid var(--border)">${dateStr}</span>`;
+            c.appendChild(sep);
+            lastDate = dateStr;
+        }
+        let show=(S.type=='public'||S.type=='group'||S.type=='channel') && m.from_user!=ME && m.from_user!=last;
         c.appendChild(createMsgNode(m, show));
         last=m.from_user;
     });
 }
 
 function closeChat() {
+    if(S.id) { let c=document.getElementById('msgs'); if(c.scrollHeight - c.scrollTop - c.clientHeight > 50) S.scroll[S.type+'_'+S.id] = c.scrollTop; else delete S.scroll[S.type+'_'+S.id]; }
     document.getElementById('main-view').classList.remove('active');
     document.getElementById('nav-panel').classList.remove('hidden');
     S.id=null;
@@ -1094,7 +1150,7 @@ async function send(){
 
     // Prepare Network Request
     let load = { message: txt, type: 'text', reply_to: S.reply, timestamp: ts };
-    if(S.type=='dm') load.to_user=S.id; else if(S.type=='group') load.group_id=S.id; else if(S.type=='public') load.group_id=-1;
+    if(S.type=='dm') load.to_user=S.id; else if(S.type=='group'||S.type=='channel') load.group_id=S.id; else if(S.type=='public') load.group_id=-1;
 
     try {
         if(S.type=='dm' && S.e2ee[S.id]){
@@ -1184,7 +1240,7 @@ async function ctxAction(act, arg) {
 
 async function sendReact(ts,e){
     let ld={message:e,type:'react',extra:ts};
-    if(S.type=='dm')ld.to_user=S.id; else if(S.type=='group') ld.group_id=S.id; else if(S.type=='public') ld.group_id=-1;
+    if(S.type=='dm')ld.to_user=S.id; else if(S.type=='group'||S.type=='channel') ld.group_id=S.id; else if(S.type=='public') ld.group_id=-1;
     req('send', ld);
     let h = await get(S.type,S.id);
     let m=h.find(x=>x.timestamp==ts);
@@ -1194,7 +1250,7 @@ async function sendReact(ts,e){
 async function deleteMsg(){
     if(!S.reply)return;
     let ld={message:'DEL', type:'delete', extra:S.reply};
-    if(S.type=='dm')ld.to_user=S.id; else if(S.type=='group') ld.group_id=S.id; else if(S.type=='public') ld.group_id=-1;
+    if(S.type=='dm')ld.to_user=S.id; else if(S.type=='group'||S.type=='channel') ld.group_id=S.id; else if(S.type=='public') ld.group_id=-1;
     req('send', ld);
     await removeMsg(S.type,S.id,S.reply); cancelReply();
 }
@@ -1271,7 +1327,7 @@ async function uploadFile(inp){
     let ts = Math.floor(Date.now()/1000);
     fd.append('timestamp', ts);
     if(S.type=='dm') fd.append('to_user', S.id);
-    else if(S.type=='group') fd.append('group_id', S.id);
+    else if(S.type=='group'||S.type=='channel') fd.append('group_id', S.id);
     else fd.append('group_id', -1);
 
     fetch('?action=upload_msg', { method:'POST', body:fd, headers:{'X-CSRF-Token': CSRF_TOKEN} })
@@ -1299,19 +1355,30 @@ function downloadFile(data, name){
 
 function cancelReply(){ S.reply=null; document.getElementById('reply-ui').style.display='none'; document.getElementById('del-btn').style.display='none'; }
 function promptChat(){ promptModal("New Chat", "Username:", async (u)=>{ if(u){ let ex=await get('dm',u); if(!ex.length) await save('dm',u,[]); openChat('dm',u); switchTab('chats'); }}); }
-function createGroup(){ promptModal("New Group", "Group Name:", (n)=>{ if(n)req('create_group',{name:n,type:'public'}); }); }
-function joinGroup(){ promptModal("Join Group", "6-Digit Code:", (c)=>{ if(c)req('join_group',{code:c}); }); }
+function createGroup(){ createEntity('group'); }
+function createChannel(){ createEntity('channel'); }
+function createEntity(type){ let label = type=='channel'?'Channel':'Group'; alertModal("Create "+label, ""); document.getElementById('modal-ok').style.display='none'; document.getElementById('modal-cancel').style.display='block'; document.getElementById('modal-body').innerHTML = \`<input id="ng-name" class="form-input" placeholder="\${label} Name"><select id="ng-type" class="form-select"><option value="public">Public (Code)</option><option value="discoverable">Discoverable (Listed)</option><option value="private">Private (Invite Only)</option></select><button class="btn-primary" style="width:100%;margin-top:10px" onclick="doCreateGroup('\${type}')">Create</button>\`; }
+function doCreateGroup(cat){ let n=document.getElementById('ng-name').value; let t=document.getElementById('ng-type').value; let btn=document.querySelector('#modal-body button'); if(n) { btn.disabled=true; btn.innerText='Creating...'; req('create_group',{name:n,type:t,category:cat}).then(r=>r.json()).then(d=>{ if(d.status=='success'){ document.getElementById('app-modal').style.display='none'; renderLists(); } else { alert(d.message||'Error'); btn.disabled=false; btn.innerText='Create'; } }).catch(()=>{ alert('Connection failed'); btn.disabled=false; btn.innerText='Create'; }); } }
+function joinGroup(){ alertModal("Join Group", ""); document.getElementById('modal-body').innerHTML = \`<input id="jg-code" class="form-input" placeholder="Invite Code"><input id="jg-pass" class="form-input" type="password" placeholder="Password (Optional)"><button class="btn-primary" style="width:100%;margin-top:10px" onclick="doJoinGroup()">Join</button>\`; }
+function doJoinGroup(){ let c=document.getElementById('jg-code').value; let p=document.getElementById('jg-pass').value; if(c) req('join_group',{code:c, password:p}).then(r=>r.json()).then(d=>{ if(d.status=='success'){ document.getElementById('app-modal').style.display='none'; renderLists(); } else alert(d.message); }); }
 function saveSettings(){ req('update_profile',{bio:document.getElementById('set-bio').value,avatar:document.getElementById('set-av').value,new_password:document.getElementById('set-pw').value}); alertModal("Settings", "Profile updated."); }
+async function discover(cat){ startProg(); alertModal("Discover "+(cat=='channel'?'Channels':'Groups'), '<div class="tab-loader" style="min-height:150px"><div class="rail-letters"><span>m</span><span>o</span><span>R</span><span>e</span></div><div class="rail-dot"></div></div>'); let r=await fetch('?action=get_discoverable_groups&cat='+cat); endProg(); let d=await r.json(); let h='<div style="max-height:300px;overflow-y:auto">'; d.items.forEach(g=>{ h+=\`<div style="padding:10px;border-bottom:1px solid #333;display:flex;justify-content:space-between;align-items:center"><div><b>\${g.name}</b><br><span style="color:#888;font-size:0.8rem">Code: \${g.join_code}</span></div><button class="btn-sec" onclick="req('join_group',{code:'\${g.join_code}'}).then(()=>{document.getElementById('app-modal').style.display='none';renderLists()})">Join</button></div>\`; }); h+='</div>'; document.getElementById('modal-body').innerHTML=h; }
 
 async function showProfilePopup() {
-    if(S.type !== 'dm') return;
-    let r = await fetch('?action=get_profile&u='+S.id);
-    let p = await r.json();
-    if(p.status === 'error') return;
-    
-    let info = `Username: ${p.username}\nBio: ${p.bio||'-'}\nJoined: ${new Date(p.joined_at*1000).toLocaleDateString()}\nLast Seen: ${new Date(p.last_seen*1000).toLocaleString()}`;
-    alertModal("Profile: " + p.username, info);
+    if(S.type === 'dm') {
+        startProg(); let r = await fetch('?action=get_profile&u='+S.id); endProg(); let p = await r.json(); if(p.status === 'error') return;
+        let html = \`<div style="text-align:center;margin-bottom:15px"><div class="avatar" style="width:80px;height:80px;margin:0 auto 10px auto;font-size:2rem;background-image:url('\${p.avatar||''}')">\${p.avatar?'':p.username[0]}</div><b>\${p.username}</b><br><span style="color:#888;font-size:0.8rem">\${p.bio||'-'}</span><br><div style="font-size:0.8rem;color:#666;margin-top:5px">Joined: \${new Date(p.joined_at*1000).toLocaleDateString()}<br>Last Seen: \${new Date(p.last_seen*1000).toLocaleString()}</div>\${!S.e2ee[S.id] ? \`<button class="btn-sec" style="margin-top:15px;width:100%" onclick="startE2EE();document.getElementById('app-modal').style.display='none'">Enable End-to-End Encryption</button>\` : \`<div style="margin-top:15px;color:var(--accent)">🔒 Encrypted</div>\`}</div>\`;
+        alertModal("Profile", ""); document.getElementById('modal-body').innerHTML = html;
+    } else if (S.type === 'group' || S.type === 'channel') {
+        startProg(); let r = await fetch('?action=get_group_details&id='+S.id); endProg(); let d = await r.json(); if(d.status === 'error') return;
+        let html = \`<div style="text-align:center;margin-bottom:15px"><b>\${d.group.name}</b><br><span style="color:#888;font-size:0.8rem">\${d.group.category=='channel'?'Channel':'Group'} - \${d.group.type} \${d.group.join_code ? '| Code: '+d.group.join_code : ''}</span><br>\${d.is_owner && d.group.type=='private' ? \`<button class="btn-sec" style="font-size:0.7rem;margin-top:5px" onclick="groupSettings(\${S.id})">Manage Invite</button>\` : ''}\${!S.e2ee[S.id] && d.group.category!='channel' ? \`<button class="btn-sec" style="margin-top:10px;width:100%" onclick="startWEncrypt();document.getElementById('app-modal').style.display='none'">Enable WEncrypt</button>\` : \`\`}</div><div style="max-height:200px;overflow-y:auto;text-align:left;margin-bottom:15px;background:#222;padding:10px;border-radius:8px"><div style="font-size:0.8rem;color:#aaa;margin-bottom:5px">Members (\${d.members.length})</div>\${d.members.map(m=>\`<div style="padding:5px;border-bottom:1px solid #333;display:flex;align-items:center"><div class="avatar" style="width:24px;height:24px;font-size:0.8rem;margin-right:8px;background-image:url('\${m.avatar||''}')">\${m.avatar?'':m.username[0]}</div><span>\${m.username}</span> \${m.public_key?'<span title="Key Available" style="color:#0f0;font-size:0.6rem;margin-left:5px">🔑</span>':''}</div>\`).join('')}</div><div style="display:flex;gap:10px;justify-content:center"><button class="btn-modal btn-sec" style="color:#f55;border-color:#f55" onclick="leaveGroup(\${S.id})">Leave Group</button>\${d.is_owner ? \`<button class="btn-modal btn-sec" style="color:#f55;border-color:#f55" onclick="nukeGroup(\${S.id})">Delete Group</button>\` : ''}</div>\`;
+        alertModal("Group Info", ""); document.getElementById('modal-body').innerHTML = html;
+    }
 }
+function groupSettings(gid){ alertModal("Group Settings", ""); document.getElementById('modal-body').innerHTML = \`<div class="form-group"><label>Enable Joining</label> <input type="checkbox" id="gs-join"></div><div class="form-group"><label>Code Suffix (Letter)</label><input id="gs-suff" class="form-input" maxlength="1" placeholder="A-Z"></div><div class="form-group"><label>Password (Optional)</label><input id="gs-pass" class="form-input" type="password"></div><div class="form-group"><label>Expiry (Minutes)</label><input id="gs-exp" class="form-input" type="number" placeholder="60"></div><button class="btn-primary" style="width:100%;margin-top:10px" onclick="saveGroupSettings(\${gid})">Generate New Code</button>\`; }
+function saveGroupSettings(gid){ let j = document.getElementById('gs-join').checked ? 1 : 0; let s = document.getElementById('gs-suff').value; let p = document.getElementById('gs-pass').value; let e = document.getElementById('gs-exp').value; req('update_group_settings', {group_id:gid, join_enabled:j, generate_code:true, suffix:s, password:p, expiry:e}).then(r=>r.json()).then(d=>{ if(d.status=='success') { alert("Settings updated & Code generated"); showProfilePopup(); } else alert(d.message); }); }
+function leaveGroup(gid){ if(confirm("Leave this group?")) req('leave_group', {group_id: gid}).then(d=>{ if(d.status=='success'){ closeChat(); delete S.groups[gid]; renderLists(); document.getElementById('app-modal').style.display='none'; } }); }
+function nukeGroup(gid){ if(confirm("Delete group for everyone?")) req('delete_group', {group_id: gid}).then(d=>{ if(d.status=='success'){ closeChat(); delete S.groups[gid]; renderLists(); document.getElementById('app-modal').style.display='none'; } }); }
 
 function scrollToBottom(force){ 
     let c=document.getElementById('msgs'); 
@@ -1319,8 +1386,7 @@ function scrollToBottom(force){
     if(c.scrollHeight - c.scrollTop - c.clientHeight < 150) c.scrollTo({ top: c.scrollHeight, behavior: 'smooth' });
 }
 function esc(t){ return t?t.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"):"" }
-
-document.getElementById('txt').onkeypress=e=>{if(e.key=='Enter')send()};
+document.getElementById('txt').onkeydown=e=>{if(e.key=='Enter' && !e.shiftKey){e.preventDefault();send()}};
 
 async function startRec(){
     try{
@@ -1350,7 +1416,7 @@ function stopRec(send){
             let r=new FileReader();
             r.onload=async ()=>{ 
                 let ts=Math.floor(Date.now()/1000);
-                let ld={message:r.result,type:'audio',timestamp:ts}; if(S.type=='dm')ld.to_user=S.id; else if(S.type=='group') ld.group_id=S.id; else if(S.type=='public') ld.group_id=-1; req('send',ld); await store(S.type,S.id,{from_user:ME,message:r.result,type:'audio',timestamp:ts}); 
+                let ld={message:r.result,type:'audio',timestamp:ts}; if(S.type=='dm')ld.to_user=S.id; else if(S.type=='group'||S.type=='channel') ld.group_id=S.id; else if(S.type=='public') ld.group_id=-1; req('send',ld); await store(S.type,S.id,{from_user:ME,message:r.result,type:'audio',timestamp:ts}); 
             };
             r.readAsDataURL(b);
         }
@@ -1358,6 +1424,9 @@ function stopRec(send){
     mediaRec.stop();
 }
 
+function playAudio(btn) { let player = btn.parentElement.querySelector('audio'); let bar = btn.parentElement.querySelector('.audio-bar'); let timeDisplay = btn.parentElement.querySelector('.audio-time'); if (currentAudio && currentAudio !== player) { currentAudio.pause(); if(currentBtn) { currentBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>'; currentBtn.classList.remove('playing'); } clearInterval(updateInterval); } if (player.paused) { player.play(); currentAudio = player; currentBtn = btn; btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>'; btn.classList.add('playing'); updateInterval = setInterval(() => { let pct = (player.currentTime / player.duration) * 100; bar.style.width = pct + '%'; timeDisplay.innerText = formatTime(player.currentTime); }, 100); player.onended = () => { btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>'; btn.classList.remove('playing'); clearInterval(updateInterval); bar.style.width = '0%'; timeDisplay.innerText = formatTime(player.duration); }; } else { player.pause(); btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>'; btn.classList.remove('playing'); clearInterval(updateInterval); } }
+function seekAudio(progress, e) { let player = progress.parentElement.querySelector('audio'); if(!player || !player.duration) return; let rect = progress.getBoundingClientRect(); let pos = (e.clientX - rect.left) / rect.width; player.currentTime = pos * player.duration; let bar = progress.querySelector('.audio-bar'); bar.style.width = (pos * 100) + '%'; }
+function formatTime(s) { if(isNaN(s) || !isFinite(s)) return "0:00"; let m = Math.floor(s / 60); let sec = Math.floor(s % 60); return m + ':' + (sec < 10 ? '0' : '') + sec; }
 document.getElementById('txt').oninput=()=>{
     if(S.type=='dm' && Date.now()-lastTyping>2000){ lastTyping=Date.now(); req('typing',{to:S.id}); }
 };
@@ -1371,7 +1440,16 @@ window.oncontextmenu = (e) => {
     if(e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
     showContextMenu(e, 'app', null);
 };
-window.onfocus=()=>{ if(S.type=='dm'&&S.id) openChat('dm',S.id); };
+window.onfocus=async ()=>{ 
+    if(S.type=='dm'&&S.id) {
+        let h=await get('dm',S.id); 
+        let last=h.filter(x=>x.from_user==S.id).pop(); 
+        if(last && last.timestamp>lastRead){ 
+            lastRead=last.timestamp; 
+            req('send',{to_user:S.id,type:'read',extra:last.timestamp}); 
+        }
+    }
+};
 
 if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
 init().catch(e=>console.error(e));

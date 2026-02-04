@@ -1,5 +1,5 @@
 <?php
-header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none';");
+header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none';");
 session_start();
 if (empty($_SESSION['csrf_token'])) {
     $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
@@ -524,7 +524,6 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
     .msg.in { align-self:flex-start; background:var(--msg-in); border-top-left-radius:0; border:1px solid transparent; }
     .msg.out { align-self:flex-end; background:var(--msg-out); border-top-right-radius:0; }
     .msg img { max-width:100%; border-radius:4px; margin-top:5px; cursor:pointer; }
-    .msg audio { max-width:250px; margin-top:5px; }
     .file-att { background:rgba(0,0,0,0.2); padding:10px; border-radius:5px; display:flex; align-items:center; gap:10px; cursor:pointer; border:1px solid rgba(255,255,255,0.1); margin-top:5px; }
     .file-att:hover { background:rgba(0,0,0,0.3); }
     .msg-sender { font-size:0.75rem; font-weight:bold; color:var(--accent); margin-bottom:4px; cursor:pointer; }
@@ -532,6 +531,16 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
     .msg.pinned { border: 1px solid var(--accent); }
     .reaction-bar { position:absolute; bottom:-12px; right:0; background:#222; border-radius:10px; padding:2px 6px; font-size:0.8rem; box-shadow:0 2px 5px rgba(0,0,0,0.5); cursor:pointer; }
     
+    /* Audio Player */
+    .audio-player { display:flex; align-items:center; gap:10px; background:rgba(0,0,0,0.2); padding:8px 12px; border-radius:20px; min-width:200px; border:1px solid rgba(255,255,255,0.1); margin-top:5px; }
+    .play-btn { width:32px; height:32px; background:var(--accent); color:#fff; border-radius:50%; flex-shrink:0; display:flex; align-items:center; justify-content:center; cursor:pointer; border:none; transition:0.2s; }
+    .play-btn:hover { filter:brightness(1.1); }
+    .play-btn svg { width:14px; height:14px; fill:currentColor; margin-left:2px; }
+    .play-btn.playing svg { margin-left:0; }
+    .audio-progress { flex:1; height:4px; background:rgba(255,255,255,0.2); border-radius:2px; position:relative; cursor:pointer; }
+    .audio-bar { height:100%; background:var(--accent); width:0%; border-radius:2px; transition:width 0.1s linear; }
+    .audio-time { font-size:0.75rem; font-family:monospace; color:#ccc; min-width:35px; text-align:right; }
+
     .input-area { padding:15px; background:var(--panel); display:flex; gap:10px; align-items:center; border-top:1px solid var(--border); }
     .input-wrapper { flex:1; position:relative; }
     .reply-ctx { background:#2a2a2a; padding:6px 10px; border-radius:5px 5px 0 0; font-size:0.8rem; color:#aaa; display:none; justify-content:space-between; }
@@ -813,7 +822,8 @@ const ME = "<?php echo $_SESSION['user']; ?>";
 const CSRF_TOKEN = "<?php echo $_SESSION['csrf_token']; ?>";
 let lastTyping = 0;
 let lastRead = 0;
-let mediaRec=null, audChunks=[];
+let mediaRec=null, audChunks=[], recMime='';
+let currentAudio=null, currentBtn=null, updateInterval=null;
 let S = { tab:'chats', id:null, type:null, reply:null, ctx:null, dms:{}, groups:{}, online:[], notifs:[], keys:{pub:null,priv:null}, e2ee:{}, we:{active:false, ready:[]} };
 
 // --- INDEXEDDB HELPERS ---
@@ -1322,7 +1332,14 @@ function createMsgNode(m, showSender){
 
     let txt=esc(m.message);
     if(m.type=='image') txt=`<img src="${m.message}" onclick="window.open(this.src)" onload="scrollToBottom(false)">`;
-    else if(m.type=='audio') txt=`<audio controls src="${m.message}"></audio>`;
+    else if(m.type=='audio') txt=`<div class="audio-player">
+            <button class="play-btn" onclick="playAudio(this)">
+                <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+            </button>
+            <div class="audio-progress" onclick="seekAudio(this, event)"><div class="audio-bar"></div></div>
+            <div class="audio-time">0:00</div>
+            <audio src="${m.message}" style="display:none" onloadedmetadata="this.parentElement.querySelector('.audio-time').innerText=formatTime(this.duration)"></audio>
+        </div>`;
     else if(m.type=='file') {
         let fname = esc(m.extra_data || 'file');
         let safeName = (m.extra_data || 'file').replace(/'/g, "\\'");
@@ -1745,13 +1762,14 @@ document.getElementById('txt').onkeydown=e=>{if(e.key=='Enter' && !e.shiftKey){e
 async function startRec(){
     try{
         let s=await navigator.mediaDevices.getUserMedia({audio:true});
-        let opts = {};
-        if(MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) opts.mimeType="audio/webm;codecs=opus";
-        else if(MediaRecorder.isTypeSupported("audio/mp4")) opts.mimeType="audio/mp4";
+        recMime='';
+        if(MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) recMime="audio/webm;codecs=opus";
+        else if(MediaRecorder.isTypeSupported("audio/mp4")) recMime="audio/mp4";
         
+        let opts = recMime ? {mimeType: recMime} : {};
         mediaRec=new MediaRecorder(s, opts); audChunks=[];
         mediaRec.ondataavailable=e=>{ if(e.data.size>0) audChunks.push(e.data); };
-        mediaRec.start(200);
+        mediaRec.start();
         document.getElementById('txt').style.display='none'; document.getElementById('btn-send').style.display='none'; document.getElementById('btn-att').style.display='none'; document.getElementById('btn-mic').style.display='none';
         document.getElementById('rec-ui').style.display='flex';
     }catch(e){alertModal('Error','Mic access denied');}
@@ -1763,7 +1781,7 @@ function stopRec(send){
         document.getElementById('txt').style.display='block'; document.getElementById('btn-send').style.display='flex'; document.getElementById('btn-att').style.display='flex'; document.getElementById('btn-mic').style.display='flex';
         document.getElementById('rec-ui').style.display='none';
         if(send && audChunks.length > 0){
-            let mime = mediaRec.mimeType || 'audio/webm;codecs=opus';
+            let mime = recMime || mediaRec.mimeType || 'audio/webm';
             let b=new Blob(audChunks,{type:mime}); 
             if(b.size < 1000) { alertModal('Error','Recording too short'); return; }
             if(b.size > 10485760) { alertModal('Error','Audio too large'); return; }
@@ -1776,6 +1794,63 @@ function stopRec(send){
         }
     };
     mediaRec.stop();
+}
+
+function playAudio(btn) {
+    let player = btn.parentElement.querySelector('audio');
+    let bar = btn.parentElement.querySelector('.audio-bar');
+    let timeDisplay = btn.parentElement.querySelector('.audio-time');
+
+    if (currentAudio && currentAudio !== player) {
+        currentAudio.pause();
+        if(currentBtn) {
+            currentBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
+            currentBtn.classList.remove('playing');
+        }
+        clearInterval(updateInterval);
+    }
+
+    if (player.paused) {
+        player.play();
+        currentAudio = player;
+        currentBtn = btn;
+        btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>';
+        btn.classList.add('playing');
+        
+        updateInterval = setInterval(() => {
+            let pct = (player.currentTime / player.duration) * 100;
+            bar.style.width = pct + '%';
+            timeDisplay.innerText = formatTime(player.currentTime);
+        }, 100);
+        
+        player.onended = () => {
+            btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
+            btn.classList.remove('playing');
+            clearInterval(updateInterval);
+            bar.style.width = '0%';
+            timeDisplay.innerText = formatTime(player.duration);
+        };
+    } else {
+        player.pause();
+        btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
+        btn.classList.remove('playing');
+        clearInterval(updateInterval);
+    }
+}
+function seekAudio(progress, e) {
+    let player = progress.parentElement.querySelector('audio');
+    if(!player || !player.duration) return;
+    let rect = progress.getBoundingClientRect();
+    let pos = (e.clientX - rect.left) / rect.width;
+    player.currentTime = pos * player.duration;
+    let bar = progress.querySelector('.audio-bar');
+    bar.style.width = (pos * 100) + '%';
+}
+function formatTime(s) {
+    if(isNaN(s) || !isFinite(s)) return "0:00";
+    let m = Math.floor(s / 60);
+    let sec = Math.floor(s % 60);
+    return m + ':' + (sec < 10 ? '0' : '') + sec;
 }
 
 document.getElementById('txt').oninput=function(){

@@ -468,6 +468,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
 <link rel="manifest" href="?action=manifest">
 <meta name="theme-color" content="#0f0518">
 <link rel="icon" href="?action=icon" type="image/svg+xml">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@100;400;700&display=swap" rel="stylesheet">
 <title>moreweb Messenger</title>
 <style>
     :root { --bg:#0f0518; --rail:#0b0b0b; --panel:#1a0b2e; --border:#2f1b42; --accent:#a855f7; --text:#e0e0e0; --msg-in:#261038; --msg-out:#581c87; }
@@ -571,6 +572,23 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
     .ctx-item:hover { background:rgba(255,255,255,0.05); }
     .ctx-separator { height:1px; background:var(--border); margin:2px 0; }
 
+    /* Loading Animation */
+    #progress-bar-container { position: fixed; top: 0; left: 0; width: 100%; height: 4px; background-color: rgba(255, 255, 255, 0.1); z-index: 10000; transition: opacity 0.8s ease-out, visibility 0.8s ease-out; pointer-events: none; }
+    #progress-bar { height: 100%; width: 0; background: linear-gradient(90deg, #4A00E0, #00BFFF, #E01E5A); border-radius: 0 2px 2px 0; transition: width 0.4s ease-out; }
+    .loader-hidden { opacity: 0 !important; visibility: hidden !important; }
+    
+    .rail-letters { position: relative; width: 40px; height: 40px; font-size: 1.8rem; font-weight: 100; color: var(--accent); font-family: 'Poppins', sans-serif; }
+    .rail-letters span { position: absolute; top: 0; left: 50%; transform: translateX(-50%); opacity: 0; animation: sequentialReplace 2s infinite; text-transform: lowercase; }
+    .rail-letters span:nth-child(1) { animation-delay: 0s; }
+    .rail-letters span:nth-child(2) { animation-delay: 0.5s; }
+    .rail-letters span:nth-child(3) { animation-delay: 1.0s; }
+    .rail-letters span:nth-child(4) { animation-delay: 1.5s; }
+    .rail-dot { width: 5px; height: 5px; background-color: var(--text); border-radius: 50%; animation: pulse 1.5s infinite ease-in-out; }
+    .tab-loader { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; width: 100%; min-height: 200px; }
+    
+    @keyframes sequentialReplace { 0%, 100% { opacity: 0; transform: translateX(-50%) scale(0.95); } 15% { opacity: 1; transform: translateX(-50%) scale(1); } 30% { opacity: 1; transform: translateX(-50%) scale(1); } 45% { opacity: 0; transform: translateX(-50%) scale(0.95); } }
+    @keyframes pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.3); opacity: 0.7; } }
+
     @media (max-width: 768px) {
         .app-container { flex-direction: column; }
         .nav-rail { 
@@ -613,6 +631,11 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
 </style>
 </head>
 <body>
+
+<!-- LOADING SYSTEM -->
+<div id="progress-bar-container">
+    <div id="progress-bar"></div>
+</div>
 
 <!-- MODAL SYSTEM -->
 <div id="app-modal" class="modal-overlay">
@@ -664,7 +687,12 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
         <div id="tab-chats" class="tab-content">
             <div style="padding:20px 15px 5px 15px"><input type="text" id="chat-search" class="form-input" placeholder="Search chats..." onkeyup="renderLists()" style="margin:0;padding:10px 15px;border-radius:20px"></div>
             <div class="panel-header" style="padding-top:5px;padding-bottom:5px;border-bottom:none">Chats <div class="btn-icon" onclick="promptChat()">+</div></div>
-            <div class="list-area" id="list-chats"></div>
+            <div class="list-area" id="list-chats">
+                <div class="tab-loader">
+                    <div class="rail-letters"><span>m</span><span>o</span><span>R</span><span>e</span></div>
+                    <div class="rail-dot"></div>
+                </div>
+            </div>
         </div>
         <div id="tab-groups" class="tab-content" style="display:none">
             <div style="padding:20px 15px 5px 15px"><input type="text" id="group-search" class="form-input" placeholder="Search groups..." onkeyup="renderLists()" style="margin:0;padding:10px 15px;border-radius:20px"></div>
@@ -674,7 +702,12 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
                 <div class="btn-icon" onclick="createGroup()" title="Create Group">+</div>
                 </div></div>
             <div style="padding:0 15px 10px 15px"><button class="form-input" style="cursor:pointer;border-radius:20px;text-align:center;background:var(--bg);border:1px solid var(--border)" onclick="joinGroup()">Join via Code</button></div>
-            <div class="list-area" id="list-groups"></div>
+            <div class="list-area" id="list-groups">
+                <div class="tab-loader">
+                    <div class="rail-letters"><span>m</span><span>o</span><span>R</span><span>e</span></div>
+                    <div class="rail-dot"></div>
+                </div>
+            </div>
         </div>
         <div id="tab-public" class="tab-content" style="display:none;height:100%">
             <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%">
@@ -912,12 +945,33 @@ async function init(){
     } catch(e) { console.error("Init failed", e); alert("App failed to initialize: " + e.message); }
 }
 
+let progW = 0;
+function startProg(){
+    let p = document.getElementById('progress-bar');
+    let c = document.getElementById('progress-bar-container');
+    c.classList.remove('loader-hidden');
+    p.style.width = '0%';
+    setTimeout(() => p.style.width = '70%', 50);
+}
+function endProg(){
+    let p = document.getElementById('progress-bar');
+    let c = document.getElementById('progress-bar-container');
+    p.style.width = '100%';
+    setTimeout(() => {
+        c.classList.add('loader-hidden');
+        setTimeout(() => p.style.width = '0%', 800);
+    }, 300);
+}
+
 async function req(act, data) {
-    return fetch('?action='+act, {
+    if(act!='poll' && act!='typing') startProg();
+    let r = await fetch('?action='+act, {
         method: 'POST',
         headers: {'Content-Type': 'application/json', 'X-CSRF-Token': CSRF_TOKEN},
         body: JSON.stringify(data||{})
     });
+    if(act!='poll' && act!='typing') endProg();
+    return r;
 }
 
 // --- CORE ---
@@ -1599,11 +1653,13 @@ function doJoinGroup(){
 
 function saveSettings(){ req('update_profile',{bio:document.getElementById('set-bio').value,avatar:document.getElementById('set-av').value,new_password:document.getElementById('set-pw').value}); alertModal("Settings", "Profile updated."); }
 
-async function discoverGroups(){ alertModal("Discover Groups", "Loading..."); let r=await fetch('?action=get_discoverable_groups'); let d=await r.json(); let h='<div style="max-height:300px;overflow-y:auto">'; d.groups.forEach(g=>{ h+=`<div style="padding:10px;border-bottom:1px solid #333;display:flex;justify-content:space-between;align-items:center"><div><b>${g.name}</b><br><span style="color:#888;font-size:0.8rem">Code: ${g.join_code}</span></div><button class="btn-sec" onclick="req('join_group',{code:'${g.join_code}'}).then(()=>{document.getElementById('app-modal').style.display='none';renderLists()})">Join</button></div>`; }); h+='</div>'; document.getElementById('modal-body').innerHTML=h; }
+async function discoverGroups(){ startProg(); alertModal("Discover Groups", '<div class="tab-loader" style="min-height:150px"><div class="rail-letters"><span>m</span><span>o</span><span>R</span><span>e</span></div><div class="rail-dot"></div></div>'); let r=await fetch('?action=get_discoverable_groups'); endProg(); let d=await r.json(); let h='<div style="max-height:300px;overflow-y:auto">'; d.groups.forEach(g=>{ h+=`<div style="padding:10px;border-bottom:1px solid #333;display:flex;justify-content:space-between;align-items:center"><div><b>${g.name}</b><br><span style="color:#888;font-size:0.8rem">Code: ${g.join_code}</span></div><button class="btn-sec" onclick="req('join_group',{code:'${g.join_code}'}).then(()=>{document.getElementById('app-modal').style.display='none';renderLists()})">Join</button></div>`; }); h+='</div>'; document.getElementById('modal-body').innerHTML=h; }
 
 async function showProfilePopup() {
     if(S.type === 'dm') {
+        startProg();
         let r = await fetch('?action=get_profile&u='+S.id);
+        endProg();
         let p = await r.json();
         if(p.status === 'error') return;
         
@@ -1619,7 +1675,9 @@ async function showProfilePopup() {
         </div>`;
         alertModal("Profile", ""); document.getElementById('modal-body').innerHTML = html;
     } else if (S.type === 'group') {
+        startProg();
         let r = await fetch('?action=get_group_details&id='+S.id);
+        endProg();
         let d = await r.json();
         if(d.status === 'error') return;
         

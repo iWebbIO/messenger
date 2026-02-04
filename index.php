@@ -426,9 +426,19 @@ body{background:#0f0518;color:#eee;font-family:sans-serif;display:flex;justify-c
 .box{background:#1a0b2e;padding:2rem;border-radius:12px;width:300px;text-align:center;box-shadow:0 10px 30px rgba(0,0,0,0.5);border:1px solid #2f1b42}
 input{width:100%;padding:12px;margin:10px 0;background:#261038;border:1px solid #2f1b42;color:#fff;border-radius:6px;box-sizing:border-box}
 button{width:100%;padding:12px;background:#a855f7;color:#fff;border:none;border-radius:6px;font-weight:bold;cursor:pointer}
+@keyframes gradientBG { 0% {background-position: 0% 50%;} 50% {background-position: 100% 50%;} 100% {background-position: 0% 50%;} }
+#login-bg {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1;
+    background: linear-gradient(-45deg, #0f0518, #3b0764, #6b21a8, #0f0518);
+    background-size: 400% 400%;
+    animation: gradientBG 3s ease infinite;
+    opacity: 0; transition: opacity 1.5s ease-in-out;
+}
+body.login-process #login-bg { opacity: 1; }
 </style>
 </head>
 <body>
+<div id="login-bg"></div>
 <div class="box">
     <h2 id="ttl">moreweb Messenger</h2><div id="err" style="color:#f55;display:none;margin-bottom:10px"></div>
     <input id="u" placeholder="Username"><input type="password" id="p" placeholder="Password">
@@ -446,15 +456,17 @@ function toggleMode() {
     document.getElementById('err').style.display = 'none';
 }
 async function sub(){
+    let u=document.getElementById('u').value.trim(),p=document.getElementById('p').value;
+    if(!u||!p){let e=document.getElementById('err');e.innerText="Please fill in all fields";e.style.display='block';return;}
+    document.body.classList.add('login-process');
     let btn=document.querySelector('button');btn.disabled=true;btn.innerText='Processing...';
-    let u=document.getElementById('u').value,p=document.getElementById('p').value;
     let r=await fetch('?action='+(reg?'register':'login'),{
         method:'POST',
         headers: {'Content-Type': 'application/json', 'X-CSRF-Token': CSRF_TOKEN},
         body:JSON.stringify({username:u,password:p})
     });
     let d=await r.json();
-    if(d.status=='success')location.reload();else{let e=document.getElementById('err');e.innerText=d.message;e.style.display='block';btn.disabled=false;btn.innerText=reg?'Sign Up':'Sign In';}
+    if(d.status=='success')location.reload();else{document.body.classList.remove('login-process');let e=document.getElementById('err');e.innerText=d.message;e.style.display='block';btn.disabled=false;btn.innerText=reg?'Sign Up':'Sign In';}
 }
 if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
 </script></body></html>

@@ -543,6 +543,8 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
     .msg.pinned { border: 1px solid var(--accent); }
     .reaction-bar { position:absolute; bottom:-12px; right:0; background:#222; border-radius:10px; padding:2px 6px; font-size:0.8rem; box-shadow:0 2px 5px rgba(0,0,0,0.5); cursor:pointer; }
     
+    .scroll-btn { position:absolute; bottom:80px; right:20px; width:35px; height:35px; background:var(--panel); border:1px solid var(--border); border-radius:50%; display:none; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 4px 10px rgba(0,0,0,0.5); z-index:90; color:var(--accent); }
+
     /* Audio Player */
     .audio-player { display:flex; align-items:center; gap:10px; background:rgba(0,0,0,0.2); padding:8px 12px; border-radius:20px; min-width:200px; border:1px solid rgba(255,255,255,0.1); margin-top:5px; }
     .play-btn { width:32px; height:32px; background:var(--accent); color:#fff; border-radius:50%; flex-shrink:0; display:flex; align-items:center; justify-content:center; cursor:pointer; border:none; transition:0.2s; }
@@ -800,6 +802,10 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
         </div>
 
         <div class="messages" id="msgs"></div>
+
+        <div id="scroll-btn" class="scroll-btn" onclick="scrollToBottom(true)">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
+        </div>
 
         <div class="input-area" id="input-box" style="visibility:hidden">
             <button class="btn-icon" id="btn-att" onclick="document.getElementById('file').click()">
@@ -1889,6 +1895,11 @@ function formatTime(s) {
 document.getElementById('txt').oninput=function(){
     this.style.height='auto'; this.style.height=Math.min(this.scrollHeight,150)+'px';
     if(S.type=='dm' && Date.now()-lastTyping>2000){ lastTyping=Date.now(); req('typing',{to:S.id}); }
+};
+document.getElementById('msgs').onscroll = (e)=>{
+    let c=e.target;
+    let b=document.getElementById('scroll-btn');
+    if(c.scrollHeight - c.scrollTop - c.clientHeight > 200) b.style.display='flex'; else b.style.display='none';
 };
 window.onclick=(e)=>{
     if(!e.target.closest('.notif-btn') && !e.target.closest('.menu-btn'))toggleNotif(false);

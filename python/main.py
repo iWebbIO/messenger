@@ -66,6 +66,12 @@ def init_db():
         try:
             db.execute("ALTER TABLE groups ADD COLUMN category TEXT DEFAULT 'group'")
             db.execute("ALTER TABLE groups ADD COLUMN join_enabled INTEGER DEFAULT 1")
+            db.execute("ALTER TABLE groups ADD COLUMN password TEXT")
+            db.execute("ALTER TABLE groups ADD COLUMN invite_expiry INTEGER")
+        except sqlite3.OperationalError: pass
+        
+        try:
+            db.execute("ALTER TABLE users ADD COLUMN public_key TEXT")
         except sqlite3.OperationalError: pass
 
 init_db()
@@ -185,6 +191,11 @@ def index():
             if 'bio' in data: db.execute("UPDATE users SET bio = ? WHERE id = ?", (data['bio'], my_id))
             if 'new_password' in data and data['new_password']:
                 db.execute("UPDATE users SET password = ? WHERE id = ?", (generate_password_hash(data['new_password']), my_id))
+            db.commit()
+            return jsonify({'status': 'success'})
+
+        if action == 'update_pubkey':
+            db.execute("UPDATE users SET public_key = ? WHERE id = ?", (data.get('key'), my_id))
             db.commit()
             return jsonify({'status': 'success'})
 

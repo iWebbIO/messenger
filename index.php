@@ -567,7 +567,8 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
     .light-mode .ctx-menu { background:#fff; border-color:#ccc; }
 
     .e2ee-on { color: var(--accent); }
-    body { margin:0; font-family:'Poppins', sans-serif; background:var(--bg); color:var(--text); height:100vh; display:flex; overflow:hidden; }
+    * { -webkit-tap-highlight-color: transparent; }
+    body { margin:0; font-family:'Poppins', sans-serif; background:var(--bg); color:var(--text); height:100vh; height:calc(var(--vh, 1vh) * 100); display:flex; overflow:hidden; }
     
     /* Custom Scrollbar */
     ::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -586,7 +587,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
 
     .nav-panel { width:280px; background:var(--panel); border-right:1px solid var(--border); display:flex; flex-direction:column; }
     .panel-header { padding:20px; font-weight:bold; font-size:1.2rem; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
-    .list-area { flex:1; overflow-y:auto; }
+    .list-area { flex:1; overflow-y:auto; overscroll-behavior-y: contain; }
     .list-item { padding:15px; border-bottom:1px solid var(--border); display:flex; align-items:center; cursor:pointer; transition:0.2s; position:relative; }
     .list-item:hover { background:rgba(255,255,255,0.1); }
     .list-item.active { background:rgba(255,255,255,0.15); border-left:4px solid var(--accent); padding-left:11px; }
@@ -609,7 +610,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
     .menu-item:hover { background:rgba(255,255,255,0.1); }
     .red-text { color: #ff5555; }
 
-    .messages { flex:1; overflow-y:auto; padding:20px; display:flex; flex-direction:column; gap:5px; }
+    .messages { flex:1; overflow-y:auto; padding:20px; display:flex; flex-direction:column; gap:5px; overscroll-behavior-y: contain; }
     .msg { max-width:65%; padding:8px 12px; border-radius:8px; font-size:0.95rem; line-height:1.4; position:relative; word-wrap:break-word; }
     .msg.in { align-self:flex-start; background:var(--msg-in); border-top-left-radius:0; border:1px solid transparent; }
     .msg.out { align-self:flex-end; background:var(--msg-out); border-top-right-radius:0; }
@@ -633,7 +634,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
     .audio-bar { height:100%; background:var(--accent); width:0%; border-radius:2px; transition:width 0.1s linear; }
     .audio-time { font-size:0.75rem; font-family:monospace; color:#ccc; min-width:35px; text-align:right; }
 
-    .input-area { padding:15px; background:var(--panel); display:flex; gap:10px; align-items:center; border-top:1px solid var(--border); }
+    .input-area { padding:15px; background:var(--panel); display:flex; gap:10px; align-items:center; border-top:1px solid var(--border); padding-bottom: calc(15px + env(safe-area-inset-bottom)); }
     .input-wrapper { flex:1; position:relative; }
     .reply-ctx { background:#2a2a2a; padding:6px 10px; border-radius:5px 5px 0 0; font-size:0.8rem; color:#aaa; display:none; justify-content:space-between; }
     input[type=text] { width:100%; padding:12px; border-radius:20px; border:none; background:var(--input-bg); color:var(--text); outline:none; box-sizing:border-box; }
@@ -693,11 +694,12 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
     @media (max-width: 768px) {
         .app-container { flex-direction: column; }
         .nav-rail { 
-            width: 100%; height: 60px; 
+            width: 100%; height: 60px;
             flex-direction: row; justify-content: space-evenly; align-items: center;
             padding-top: 0; border-right: none; border-top: 1px solid var(--border);
             position: fixed; bottom: 0; left: 0; background: var(--panel);
             z-index: 30;
+            padding-bottom: env(safe-area-inset-bottom);
         }
         .rail-btn { margin-bottom: 0; width: auto; height: 100%; flex: 1; border-radius: 0; }
         .rail-btn:hover { background: none; }
@@ -707,7 +709,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
         
         .nav-panel { 
             width: 100%; left: 0; top: 0; 
-            height: calc(100% - 60px); 
+            height: calc(100% - 60px - env(safe-area-inset-bottom)); 
             border-right: none; 
             z-index: 5;
             position: absolute;
@@ -727,6 +729,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
         .list-item { padding: 20px 15px; }
         .avatar { width: 45px; height: 45px; }
         .btn-icon svg { width: 28px; height: 28px; }
+        input, textarea { font-size: 16px !important; }
     }
     @media (min-width: 769px) { .back-btn { display:none; } }
 </style>
@@ -936,6 +939,11 @@ let lastRead = 0;
 let mediaRec=null, audChunks=[], recMime='';
 let currentAudio=null, currentBtn=null, updateInterval=null;
 let S = { tab:'chats', id:null, type:null, reply:null, ctx:null, dms:{}, groups:{}, online:[], notifs:[], keys:{pub:null,priv:null}, e2ee:{}, we:{active:false, ready:[]}, scroll:{} };
+
+// Mobile Viewport Fix
+function setVh() { document.documentElement.style.setProperty('--vh', (window.innerHeight*0.01)+'px'); }
+window.addEventListener('resize', setVh);
+setVh();
 
 // --- INDEXEDDB HELPERS ---
 const DB_NAME = 'mw_chat_db';
@@ -1459,7 +1467,7 @@ async function openChat(t,i){
     document.getElementById('chat-sub').innerText=sub;
     document.getElementById('txt').placeholder = (t=='dm' && S.e2ee[S.id]) ? "Type an encrypted message..." : (canPost ? "Type a message..." : "Only owner can post");
     document.getElementById('input-box').style.visibility = canPost ? 'visible' : 'hidden';
-    setTimeout(()=>document.getElementById('txt').focus(), 50);
+    if(window.innerWidth > 768) setTimeout(()=>document.getElementById('txt').focus(), 50);
     
     if(t=='dm'){ let h=await get('dm',i); let last=h.filter(x=>x.from_user==i).pop(); if(last && last.timestamp>lastRead){ lastRead=last.timestamp; req('send',{to_user:i,type:'read',extra:last.timestamp}); } }
 }

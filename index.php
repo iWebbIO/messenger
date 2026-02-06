@@ -966,13 +966,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
                     <span class="att-label">Location</span>
                 </div>
             </div>
-            <button class="btn-icon" id="btn-att" onclick="handleAttClick(event)">
-                <svg viewBox="0 0 24 24" width="24" fill="currentColor"><path d="M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5a2.5 2.5 0 0 1 5 0v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5a2.5 2.5 0 0 0 5 0V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z"/></svg>
-            </button>
             <input type="file" id="file" hidden onchange="uploadFile(this)">
-            <button class="btn-icon" id="btn-mic" onclick="startRec()">
-                <svg viewBox="0 0 24 24" width="24" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/><path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>
-            </button>
             <div class="input-wrapper">
                 <div class="reply-ctx" id="reply-ui">
                     <span id="reply-txt"></span>
@@ -986,8 +980,12 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
                 </div>
                 <textarea id="txt" rows="1" placeholder="Type a message..." enterkeyhint="send"></textarea>
             </div>
-            <button class="btn-icon" id="btn-send" style="color:var(--accent)" onmousedown="event.preventDefault()" onclick="send()">
-                <svg viewBox="0 0 24 24" width="24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+            <button class="btn-icon" id="btn-att" onclick="handleAttClick(event)">
+                <svg viewBox="0 0 24 24" width="24" fill="currentColor"><path d="M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5a2.5 2.5 0 0 1 5 0v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5a2.5 2.5 0 0 0 5 0V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z"/></svg>
+            </button>
+            <button class="btn-icon" id="btn-send" style="color:var(--accent)" onmousedown="event.preventDefault()" onclick="handleMainBtn()">
+                <svg id="icon-mic" viewBox="0 0 24 24" width="24" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/><path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>
+                <svg id="icon-send" viewBox="0 0 24 24" width="24" fill="currentColor" style="display:none"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
             </button>
         </div>
     </div>
@@ -1537,6 +1535,7 @@ async function openChat(t,i){
     document.getElementById('chat-sub').innerText=sub;
     document.getElementById('txt').placeholder = (t=='dm' && S.e2ee[S.id]) ? "Type an encrypted message..." : (canPost ? "Type a message..." : "Only owner can post");
     document.getElementById('input-box').style.visibility = canPost ? 'visible' : 'hidden';
+    toggleMainBtn();
     if(window.innerWidth > 768) setTimeout(()=>document.getElementById('txt').focus(), 50);
     
     if(t=='dm'){ let h=await get('dm',i); let last=h.filter(x=>x.from_user==i).pop(); if(last && last.timestamp>lastRead){ lastRead=last.timestamp; req('send',{to_user:i,type:'read',extra:last.timestamp}); } }
@@ -1626,6 +1625,7 @@ async function send(){
     // Optimistic UI
     document.getElementById('txt').value=''; 
     document.getElementById('txt').style.height='40px';
+    toggleMainBtn();
     if(navigator.vibrate) navigator.vibrate(20);
     cancelReply();
     
@@ -2061,6 +2061,7 @@ function scrollToBottom(force){
 function esc(t){ return t?t.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"):"" }
 
 document.getElementById('txt').onkeydown=e=>{if(e.key=='Enter' && !e.shiftKey){e.preventDefault();send()}};
+document.getElementById('txt').onkeydown=e=>{if(e.key=='Enter' && !e.shiftKey){e.preventDefault();handleMainBtn()}};
 
 async function startRec(){
     try{
@@ -2074,6 +2075,7 @@ async function startRec(){
         mediaRec.ondataavailable=e=>{ if(e.data.size>0) audChunks.push(e.data); };
         mediaRec.start();
         document.getElementById('txt').style.display='none'; document.getElementById('btn-send').style.display='none'; document.getElementById('btn-att').style.display='none'; document.getElementById('btn-mic').style.display='none';
+        document.getElementById('txt').style.display='none'; document.getElementById('btn-send').style.display='none'; document.getElementById('btn-att').style.display='none';
         document.getElementById('rec-ui').style.display='flex';
     }catch(e){alertModal('Error','Mic access denied');}
 }
@@ -2082,6 +2084,7 @@ function stopRec(send){
     mediaRec.onstop=()=>{
         mediaRec.stream.getTracks().forEach(t=>t.stop());
         document.getElementById('txt').style.display='block'; document.getElementById('btn-send').style.display='flex'; document.getElementById('btn-att').style.display='flex'; document.getElementById('btn-mic').style.display='flex';
+        document.getElementById('txt').style.display='block'; document.getElementById('btn-send').style.display='flex'; document.getElementById('btn-att').style.display='flex';
         document.getElementById('rec-ui').style.display='none';
         if(send && audChunks.length > 0){
             let mime = recMime || mediaRec.mimeType || 'audio/webm';
@@ -2156,8 +2159,21 @@ function formatTime(s) {
     return m + ':' + (sec < 10 ? '0' : '') + sec;
 }
 
+function handleMainBtn() {
+    let txt = document.getElementById('txt').value.trim();
+    if (txt) send();
+    else startRec();
+}
+
+function toggleMainBtn() {
+    let hasText = document.getElementById('txt').value.trim().length > 0;
+    document.getElementById('icon-mic').style.display = hasText ? 'none' : 'block';
+    document.getElementById('icon-send').style.display = hasText ? 'block' : 'none';
+}
+
 document.getElementById('txt').oninput=function(){
     this.style.height='auto'; this.style.height=Math.min(this.scrollHeight,150)+'px';
+    toggleMainBtn();
     if(S.type=='dm' && Date.now()-lastTyping>2000){ lastTyping=Date.now(); req('typing',{to:S.id}); }
 };
 document.getElementById('msgs').onscroll = (e)=>{

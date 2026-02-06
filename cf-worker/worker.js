@@ -582,7 +582,7 @@ const APP_HTML = (username, csrf, uid) => `<!DOCTYPE html>
                 <div id="rec-ui" style="display:none;align-items:center;height:40px;background:#333;border-radius:20px;padding:0 15px;color:#f55"><span style="flex:1">Recording...</span><span onclick="stopRec(false)" style="cursor:pointer;margin-right:15px;color:#ccc">&times;</span><span onclick="stopRec(true)" style="cursor:pointer;color:var(--accent)">&#10004;</span></div>
                 <textarea id="txt" rows="1" placeholder="Type a message..."></textarea>
             </div>
-            <button class="btn-icon" id="btn-send" style="color:var(--accent)" onclick="send()"><svg viewBox="0 0 24 24" width="24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></button>
+            <button class="btn-icon" id="btn-send" style="color:var(--accent)" onmousedown="event.preventDefault()" onclick="send()"><svg viewBox="0 0 24 24" width="24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></button>
         </div>
     </div>
 </div>

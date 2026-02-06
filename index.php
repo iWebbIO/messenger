@@ -444,7 +444,6 @@ if (!isset($_SESSION['user'])) {
 ?>
 <!DOCTYPE html>
 <html lang="en">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>moreweb Messenger - Login</title>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
@@ -456,10 +455,6 @@ if (!isset($_SESSION['user'])) {
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@100;300;400;700&display=swap" rel="stylesheet">
 <style>
-body{background:#0f0518;color:#eee;font-family:sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}
-.box{background:#1a0b2e;padding:2rem;border-radius:12px;width:300px;text-align:center;box-shadow:0 10px 30px rgba(0,0,0,0.5);border:1px solid #2f1b42}
-input{width:100%;padding:12px;margin:10px 0;background:#261038;border:1px solid #2f1b42;color:#fff;border-radius:6px;box-sizing:border-box}
-button{width:100%;padding:12px;background:#a855f7;color:#fff;border:none;border-radius:6px;font-weight:bold;cursor:pointer}
     :root { --dark-bg: #000000; --neon-accent: #bf00ff; --text-heading: #ffffff; }
     body{background:#0f0518;color:#eee;font-family:'Poppins', sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;overflow:hidden}
     
@@ -469,7 +464,6 @@ button{width:100%;padding:12px;background:#a855f7;color:#fff;border:none;border-
     
 @keyframes gradientBG { 0% {background-position: 0% 50%;} 50% {background-position: 100% 50%;} 100% {background-position: 0% 50%;} }
 #login-bg {
-    position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1;
     position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 0;
     background: linear-gradient(-45deg, #0f0518, #3b0764, #6b21a8, #0f0518);
     background-size: 400% 400%;
@@ -548,7 +542,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
 <link rel="manifest" href="?action=manifest">
 <meta name="theme-color" content="#0f0518">
 <link rel="icon" href="?action=icon" type="image/svg+xml">
@@ -558,8 +552,10 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
     :root { --bg:#0f0518; --rail:#0b0b0b; --panel:#1a0b2e; --border:#2f1b42; --accent:#a855f7; --text:#e0e0e0; --msg-in:#261038; --msg-out:#581c87; --sb-thumb:rgba(255,255,255,0.5); --sb-hover:rgba(255,255,255,0.7); --input-bg:#333; --pattern:#222; --hover-overlay:rgba(255,255,255,0.05); }
     .light-mode { --bg:#ffffff; --rail:#f0f0f0; --panel:#f5f5f5; --border:#ddd; --text:#111; --msg-in:#fff; --msg-out:#f3e8ff; --sb-thumb:rgba(0,0,0,0.4); --sb-hover:rgba(0,0,0,0.6); --input-bg:#fff; --pattern:#e5e5e5; --hover-overlay:rgba(0,0,0,0.05); }
     .light-mode .rail-btn { color:#555; }
-    .light-mode .rail-btn:hover { background:#e0e0e0; color:#000; }
-    .light-mode .list-item:hover { background:#f0f0f0; }
+    @media (hover: hover) {
+        .light-mode .rail-btn:hover { background:#e0e0e0; color:#000; }
+        .light-mode .list-item:hover { background:#f0f0f0; }
+    }
     .light-mode .list-item.active { background:#e6e6e6; }
     .light-mode input { background:#fff; border:1px solid #ccc; color:#000; }
     .light-mode .msg-meta { color:#777; }
@@ -569,6 +565,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
     .e2ee-on { color: var(--accent); }
     * { -webkit-tap-highlight-color: transparent; }
     body { margin:0; font-family:'Poppins', sans-serif; background:var(--bg); color:var(--text); height:100vh; height:calc(var(--vh, 1vh) * 100); display:flex; overflow:hidden; }
+    body { margin:0; font-family:'Poppins', sans-serif; background:var(--bg); color:var(--text); height:100vh; height:calc(var(--vh, 1vh) * 100); display:flex; overflow:hidden; overscroll-behavior-y: none; }
     
     /* Custom Scrollbar */
     ::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -579,8 +576,9 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
     /* Layout */
     .app-container { display:flex; width:100%; height:100%; }
     .nav-rail { width:60px; background:var(--rail); border-right:1px solid var(--border); display:flex; flex-direction:column; align-items:center; padding-top:20px; z-index:10; }
-    .rail-btn { width:40px; height:40px; border-radius:10px; display:flex; align-items:center; justify-content:center; margin-bottom:15px; cursor:pointer; color:#888; transition:0.2s; position:relative; }
-    .rail-btn:hover { background:rgba(255,255,255,0.1); color:#fff; }
+    .rail-btn { width:40px; height:40px; border-radius:10px; display:flex; align-items:center; justify-content:center; margin-bottom:15px; cursor:pointer; color:#888; transition:0.2s; position:relative; user-select:none; }
+    @media (hover: hover) { .rail-btn:hover { background:rgba(255,255,255,0.1); color:#fff; } }
+    .rail-btn:active { transform: scale(0.95); background:rgba(255,255,255,0.1); }
     .rail-btn.active { background:var(--accent); color:#fff; }
     .rail-btn svg { width:24px; height:24px; fill:currentColor; }
     .rail-badge { position:absolute; top:-2px; right:-2px; background:red; border-radius:50%; width:10px; height:10px; display:none; border:2px solid var(--rail); }
@@ -588,8 +586,9 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
     .nav-panel { width:280px; background:var(--panel); border-right:1px solid var(--border); display:flex; flex-direction:column; }
     .panel-header { padding:20px; font-weight:bold; font-size:1.2rem; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
     .list-area { flex:1; overflow-y:auto; overscroll-behavior-y: contain; }
-    .list-item { padding:15px; border-bottom:1px solid var(--border); display:flex; align-items:center; cursor:pointer; transition:0.2s; position:relative; }
-    .list-item:hover { background:rgba(255,255,255,0.1); }
+    .list-item { padding:15px; border-bottom:1px solid var(--border); display:flex; align-items:center; cursor:pointer; transition:0.2s; position:relative; user-select:none; }
+    @media (hover: hover) { .list-item:hover { background:rgba(255,255,255,0.1); } }
+    .list-item:active { background:rgba(255,255,255,0.05); }
     .list-item.active { background:rgba(255,255,255,0.15); border-left:4px solid var(--accent); padding-left:11px; }
     .avatar { width:40px; height:40px; border-radius:50%; background:#444; margin-right:12px; display:flex; align-items:center; justify-content:center; font-weight:bold; background-size:cover; flex-shrink:0; }
     
@@ -641,8 +640,9 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
     #txt { width:100%; padding:10px 12px; border-radius:20px; border:none; background:var(--input-bg); color:var(--text); outline:none; box-sizing:border-box; resize:none; height:40px; font-family:inherit; overflow-y:hidden; line-height:1.4; display:block; }
     
     #btn-e2ee svg { fill: var(--accent); }
-    .btn-icon { background:none; border:none; color:#888; cursor:pointer; display:flex; align-items:center; justify-content:center; border-radius:50%; transition:0.2s; width:40px; height:40px; padding:0; position:relative; flex-shrink:0; }
-    .btn-icon:hover { color:#fff; background:rgba(255,255,255,0.1); }
+    .btn-icon { background:none; border:none; color:#888; cursor:pointer; display:flex; align-items:center; justify-content:center; border-radius:50%; transition:0.2s; width:40px; height:40px; padding:0; position:relative; flex-shrink:0; user-select:none; }
+    @media (hover: hover) { .btn-icon:hover { color:#fff; background:rgba(255,255,255,0.1); } }
+    .btn-icon:active { transform: scale(0.9); background:rgba(255,255,255,0.15); }
     .btn-primary { background:var(--accent); color:#fff; border:none; padding:8px 16px; border-radius:20px; cursor:pointer; font-weight:bold; }
     
     .settings-panel { padding:20px; text-align:center; }
@@ -688,6 +688,12 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
     .rail-dot { width: 5px; height: 5px; background-color: var(--text); border-radius: 50%; animation: pulse 1.5s infinite ease-in-out; }
     .tab-loader { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; width: 100%; min-height: 200px; }
     
+    /* Lightbox */
+    .lightbox { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.95); z-index:2000; display:none; align-items:center; justify-content:center; flex-direction:column; backdrop-filter:blur(5px); }
+    .lightbox img { max-width:100%; max-height:85%; object-fit:contain; box-shadow:0 0 20px rgba(0,0,0,0.5); }
+    .lightbox-controls { position:absolute; top:15px; right:15px; display:flex; gap:15px; z-index:2001; }
+    .lb-btn { width:40px; height:40px; background:rgba(255,255,255,0.1); border-radius:50%; display:flex; align-items:center; justify-content:center; color:#fff; cursor:pointer; backdrop-filter:blur(10px); }
+    
     @keyframes sequentialReplace { 0%, 100% { opacity: 0; transform: translateX(-50%) scale(0.95); } 15% { opacity: 1; transform: translateX(-50%) scale(1); } 30% { opacity: 1; transform: translateX(-50%) scale(1); } 45% { opacity: 0; transform: translateX(-50%) scale(0.95); } }
     @keyframes pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.3); opacity: 0.7; } }
 
@@ -702,7 +708,6 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
             padding-bottom: env(safe-area-inset-bottom);
         }
         .rail-btn { margin-bottom: 0; width: auto; height: 100%; flex: 1; border-radius: 0; }
-        .rail-btn:hover { background: none; }
         .rail-btn.active { background: transparent; color: var(--accent); position: relative; }
         .rail-btn.active::after { content:''; position:absolute; top:0; left:0; width:100%; height:3px; background:var(--accent); }
         .rail-spacer { display: none; }
@@ -726,10 +731,13 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
         .main-view.active { transform: translateX(0); }
         
         .back-btn { display: flex; align-items: center; justify-content: center; margin-right: 10px; font-size: 1.5rem; padding: 5px; }
+        .back-btn { display: flex; align-items: center; justify-content: center; margin-right: 5px; font-size: 1.5rem; padding: 10px; }
         .list-item { padding: 20px 15px; }
         .avatar { width: 45px; height: 45px; }
         .btn-icon svg { width: 28px; height: 28px; }
         input, textarea { font-size: 16px !important; }
+        .msg { max-width: 85%; }
+        .messages { padding: 10px; }
     }
     @media (min-width: 769px) { .back-btn { display:none; } }
 </style>
@@ -922,9 +930,9 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
                     <span onclick="stopRec(false)" style="cursor:pointer;margin-right:15px;color:#ccc">&times;</span>
                     <span onclick="stopRec(true)" style="cursor:pointer;color:var(--accent)">&#10004;</span>
                 </div>
-                <textarea id="txt" rows="1" placeholder="Type a message..."></textarea>
+                <textarea id="txt" rows="1" placeholder="Type a message..." enterkeyhint="send"></textarea>
             </div>
-            <button class="btn-icon" id="btn-send" style="color:var(--accent)" onclick="send()">
+            <button class="btn-icon" id="btn-send" style="color:var(--accent)" onmousedown="event.preventDefault()" onclick="send()">
                 <svg viewBox="0 0 24 24" width="24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
             </button>
         </div>
@@ -1546,6 +1554,7 @@ function closeChat() {
     document.getElementById('main-view').classList.remove('active');
     document.getElementById('nav-panel').classList.remove('hidden');
     S.id=null;
+    renderLists();
 }
 
 async function send(){
@@ -1555,6 +1564,7 @@ async function send(){
     // Optimistic UI
     document.getElementById('txt').value=''; 
     document.getElementById('txt').style.height='40px';
+    if(navigator.vibrate) navigator.vibrate(20);
     cancelReply();
     
     let ts = Math.floor(Date.now()/1000);
@@ -1629,6 +1639,7 @@ function showContextMenu(e, type, data) {
     if (y + menu.offsetHeight > window.innerHeight) y = window.innerHeight - menu.offsetHeight;
     menu.style.left = x + 'px';
     menu.style.top = y + 'px';
+    if(navigator.vibrate) navigator.vibrate(30);
 }
 
 function onChatListContext(e, type, id) { showContextMenu(e, 'chat_list', {type, id}); }
@@ -2045,6 +2056,16 @@ window.onfocus=async ()=>{
         }
     }
 };
+
+// Mobile Swipe Back
+let tSX=0, tSY=0;
+const mv = document.getElementById('main-view');
+mv.addEventListener('touchstart', e => { tSX=e.changedTouches[0].screenX; tSY=e.changedTouches[0].screenY; }, {passive:true});
+mv.addEventListener('touchend', e => {
+    if(window.innerWidth > 768) return;
+    let tEX=e.changedTouches[0].screenX, tEY=e.changedTouches[0].screenY;
+    if(tEX - tSX > 80 && Math.abs(tEY - tSY) < 60 && tSX < 50) closeChat();
+}, {passive:true});
 
 if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
 init().catch(e=>console.error(e));

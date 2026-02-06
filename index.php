@@ -455,8 +455,8 @@ if (!isset($_SESSION['user'])) {
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@100;300;400;700&display=swap" rel="stylesheet">
 <style>
-    :root { --dark-bg: #000000; --neon-accent: #bf00ff; --text-heading: #ffffff; }
-    body{background:#0f0518;color:#eee;font-family:'Poppins', sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;overflow:hidden}
+    :root { --dark-bg: #000000; --neon-accent: #bf00ff; --text-heading: #ffffff; --accent: #a855f7; }
+    body{background:#0f0518;color:#eee;font-family:'Calibri', 'Poppins', sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;overflow:hidden}
     
     .box{background:#1a0b2e;padding:2rem;border-radius:12px;width:300px;text-align:center;box-shadow:0 10px 30px rgba(0,0,0,0.5);border:1px solid #2f1b42;position:relative;z-index:10}
     input{width:100%;padding:12px;margin:10px 0;background:#261038;border:1px solid #2f1b42;color:#fff;border-radius:6px;box-sizing:border-box;font-family:inherit}
@@ -481,7 +481,7 @@ body.login-process #login-bg { opacity: 1; }
         pointer-events: none;
     }
     .splash-screen .word {
-        color: #FFFFFF; font-family: 'Poppins', sans-serif; font-weight: 100; font-size: clamp(4rem, 15vw, 10rem);
+        color: #FFFFFF; font-family: 'Poppins', sans-serif; font-weight: 100; font-size: clamp(8rem, 15vw, 10rem);
         display: grid; grid-template-columns: auto auto; justify-items: center;
         line-height: 0.8; gap: 0.15em; text-shadow: 0 0 30px var(--neon-accent); direction: ltr;
         animation: fadeWordOut 0.3s cubic-bezier(0.55, 0.085, 0.68, 0.53) 1.0s forwards;
@@ -496,12 +496,22 @@ body.login-process #login-bg { opacity: 1; }
     .splash-screen .word span:nth-child(2) { animation: letterAppear 0.3s ease-out 0.15s forwards; }
     .splash-screen .word span:nth-child(3) { animation: letterAppear 0.3s ease-out 0.25s forwards; }
     .splash-screen .word span:nth-child(4) { animation: letterAppear 0.3s ease-out 0.30s forwards; }
+
+    .lang-toggle { position: absolute; top: 20px; right: 20px; background: rgba(255,255,255,0.1); border-radius: 30px; display: flex; overflow: hidden; cursor: pointer; border: 1px solid rgba(255,255,255,0.2); z-index: 20; }
+    .lang-opt { padding: 10px 20px; font-weight: bold; color: #888; transition: 0.3s; font-size: 1.2rem; }
+    .lang-opt.active { background: var(--accent); color: #fff; }
+    .rtl { direction: rtl; font-family: 'Calibri', 'Tahoma', sans-serif; }
 </style>
 </head>
 <body>
 
 <div class="splash-screen">
     <div class="word"><span>m</span><span>o</span><span>r</span><span>e</span></div>
+</div>
+
+<div class="lang-toggle">
+    <div class="lang-opt active" id="l-en" onclick="setLang('en')">EN</div>
+    <div class="lang-opt" id="l-fa" onclick="setLang('fa')">فا</div>
 </div>
 
 <div id="login-bg"></div>
@@ -514,26 +524,46 @@ body.login-process #login-bg { opacity: 1; }
 <script>
 const CSRF_TOKEN = "<?php echo $_SESSION['csrf_token']; ?>";
 let reg=false;
+const TR = {
+    en: { ttl: "moreweb Messenger", signin: "Sign In", signup: "Sign Up", user: "Username", pass: "Password", no_acc: "Need an account? Create one", has_acc: "Already have an account? Sign In", create: "Create Account", err: "Please fill in all fields", proc: "Processing..." },
+    fa: { ttl: "پیام‌رسان موروب", signin: "ورود", signup: "ثبت نام", user: "نام کاربری", pass: "رمز عبور", no_acc: "حساب ندارید؟ یکی بسازید", has_acc: "حساب دارید؟ وارد شوید", create: "ایجاد حساب", err: "لطفا تمام فیلدها را پر کنید", proc: "در حال پردازش..." }
+};
+let curLang = localStorage.getItem('mw_lang') || 'en';
+
+function setLang(l) {
+    curLang = l; localStorage.setItem('mw_lang', l);
+    document.body.classList.toggle('rtl', l=='fa');
+    document.getElementById('l-en').classList.toggle('active', l=='en');
+    document.getElementById('l-fa').classList.toggle('active', l=='fa');
+    applyLang();
+}
+function applyLang() {
+    const t = TR[curLang];
+    document.getElementById('ttl').innerText = reg ? t.create : t.ttl;
+    document.getElementById('u').placeholder = t.user;
+    document.getElementById('p').placeholder = t.pass;
+    document.querySelector('button').innerText = reg ? t.signup : t.signin;
+    document.getElementById('toggle-text').innerText = reg ? t.has_acc : t.no_acc;
+}
 function toggleMode() {
     reg = !reg;
-    document.getElementById('ttl').innerText = reg ? 'Create Account' : 'moreweb Messenger';
-    document.querySelector('button').innerText = reg ? 'Sign Up' : 'Sign In';
-    document.getElementById('toggle-text').innerText = reg ? 'Already have an account? Sign In' : 'Need an account? Create one';
+    applyLang();
     document.getElementById('err').style.display = 'none';
 }
 async function sub(){
     let u=document.getElementById('u').value.trim(),p=document.getElementById('p').value;
     if(!u||!p){let e=document.getElementById('err');e.innerText="Please fill in all fields";e.style.display='block';return;}
     document.body.classList.add('login-process');
-    let btn=document.querySelector('button');btn.disabled=true;btn.innerText='Processing...';
+    let btn=document.querySelector('button');btn.disabled=true;btn.innerText=TR[curLang].proc;
     let r=await fetch('?action='+(reg?'register':'login'),{
         method:'POST',
         headers: {'Content-Type': 'application/json', 'X-CSRF-Token': CSRF_TOKEN},
         body:JSON.stringify({username:u,password:p})
     });
     let d=await r.json();
-    if(d.status=='success')location.reload();else{document.body.classList.remove('login-process');let e=document.getElementById('err');e.innerText=d.message;e.style.display='block';btn.disabled=false;btn.innerText=reg?'Sign Up':'Sign In';}
+    if(d.status=='success')location.reload();else{document.body.classList.remove('login-process');let e=document.getElementById('err');e.innerText=d.message;e.style.display='block';btn.disabled=false;applyLang();}
 }
+setLang(curLang);
 if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
 </script></body></html>
 <?php exit; } ?>
@@ -564,8 +594,14 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
 
     .e2ee-on { color: var(--accent); }
     * { -webkit-tap-highlight-color: transparent; }
-    body { margin:0; font-family:'Poppins', sans-serif; background:var(--bg); color:var(--text); height:100vh; height:calc(var(--vh, 1vh) * 100); display:flex; overflow:hidden; }
-    body { margin:0; font-family:'Poppins', sans-serif; background:var(--bg); color:var(--text); height:100vh; height:calc(var(--vh, 1vh) * 100); display:flex; overflow:hidden; overscroll-behavior-y: none; }
+    body { margin:0; font-family:'Calibri', 'Poppins', sans-serif; background:var(--bg); color:var(--text); height:100vh; height:calc(var(--vh, 1vh) * 100); display:flex; overflow:hidden; overscroll-behavior-y: none; }
+    .rtl { direction: rtl; text-align: right; font-family: 'Calibri', 'Tahoma', sans-serif; }
+    .rtl .nav-rail { border-right: none; border-left: 1px solid var(--border); }
+    .rtl .nav-panel { border-right: none; border-left: 1px solid var(--border); }
+    .rtl .list-item.active { border-left: none; border-right: 4px solid var(--accent); padding-left: 15px; padding-right: 11px; }
+    .rtl .avatar { margin-right: 0; margin-left: 12px; }
+    .rtl .msg-meta { text-align: left; }
+    .rtl .rail-btn svg { transform: scaleX(-1); }
     
     /* Custom Scrollbar */
     ::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -704,7 +740,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
     .toast.show { opacity:1; }
 
     /* Attachment Menu */
-    .att-menu { position:absolute; bottom:75px; left:15px; background:var(--panel); border:1px solid var(--border); border-radius:16px; padding:20px; display:none; grid-template-columns: repeat(3, 1fr); gap:25px; box-shadow:0 10px 40px rgba(0,0,0,0.6); z-index:100; animation: slideUp 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+    .att-menu { width:100%; background:var(--panel); border-top:1px solid var(--border); padding:20px; padding-bottom:calc(20px + env(safe-area-inset-bottom)); display:none; grid-template-columns: repeat(4, 1fr); gap:10px; z-index:100; animation: slideUp 0.2s ease-out; box-sizing:border-box; }
     .att-item { display:flex; flex-direction:column; align-items:center; cursor:pointer; gap:8px; }
     .att-icon { width:56px; height:56px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#fff; transition:transform 0.2s; box-shadow: 0 4px 10px rgba(0,0,0,0.2); }
     .att-icon svg { width: 28px; height: 28px; fill: currentColor; }
@@ -714,7 +750,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
     .att-gal { background: linear-gradient(135deg, #8E2DE2, #4A00E0); }
     .att-file { background: linear-gradient(135deg, #11998e, #38ef7d); }
     .att-loc { background: linear-gradient(135deg, #ff9966, #ff5e62); }
-    @keyframes slideUp { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
     
     @keyframes sequentialReplace { 0%, 100% { opacity: 0; transform: translateX(-50%) scale(0.95); } 15% { opacity: 1; transform: translateX(-50%) scale(1); } 30% { opacity: 1; transform: translateX(-50%) scale(1); } 45% { opacity: 0; transform: translateX(-50%) scale(0.95); } }
     @keyframes pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.3); opacity: 0.7; } }
@@ -729,6 +765,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
             z-index: 30;
             padding-bottom: env(safe-area-inset-bottom);
         }
+        .rtl .nav-rail { border-left: none; border-top: 1px solid var(--border); }
         .rail-btn { margin-bottom: 0; width: auto; height: 100%; flex: 1; border-radius: 0; }
         .rail-btn.active { background: transparent; color: var(--accent); position: relative; }
         .rail-btn.active::after { content:''; position:absolute; top:0; left:0; width:100%; height:3px; background:var(--accent); }
@@ -741,6 +778,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
             z-index: 5;
             position: absolute;
         }
+        .rtl .nav-panel { border-left: none; }
         .nav-panel.hidden { display: flex; }
         
         .main-view { 
@@ -750,6 +788,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
             transform: translateX(100%); transition: transform 0.3s cubic-bezier(0.4, 0.0, 0.2, 1);
             background: var(--bg);
         }
+        .rtl .main-view { transform: translateX(-100%); }
         .main-view.active { transform: translateX(0); }
         
         .back-btn { display: flex; align-items: center; justify-content: center; margin-right: 10px; font-size: 1.5rem; padding: 5px; }
@@ -760,8 +799,10 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
         input, textarea { font-size: 16px !important; }
         .msg { max-width: 85%; }
         .messages { padding: 10px; }
+        .desktop-only { display: none !important; }
+        .mobile-only { display: block !important; }
     }
-    @media (min-width: 769px) { .back-btn { display:none; } }
+    @media (min-width: 769px) { .back-btn { display:none; } .mobile-only { display: none !important; } }
 </style>
 </head>
 <body>
@@ -822,13 +863,13 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
         </div>
         
         <div style="flex:1" class="rail-spacer"></div>
-        <div class="rail-btn" id="nav-about" onclick="switchTab('about')">
+        <div class="rail-btn desktop-only" id="nav-about" onclick="switchTab('about')">
             <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
         </div>
         <div class="rail-btn" id="nav-settings" onclick="switchTab('settings')">
             <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L3.16 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
         </div>
-        <div class="rail-btn" onclick="if(confirm('Logout?'))location.href='?action=logout'" title="Logout">
+        <div class="rail-btn desktop-only" onclick="if(confirm('Logout?'))location.href='?action=logout'" title="Logout">
             <svg viewBox="0 0 24 24"><path d="M10.09 15.59L11.5 17l5-5-5-5-1.41 1.41L12.67 11H3v2h9.67l-2.58 2.59zM19 3H5c-1.11 0-2 .9-2 2v4h2V5h14v14H5v-4H3v4c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg>
         </div>
     </div>
@@ -837,7 +878,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
     <div class="nav-panel" id="nav-panel">
         <div id="tab-chats" class="tab-content">
             <div style="padding:20px 15px 5px 15px"><input type="text" id="chat-search" class="form-input" placeholder="Search chats..." onkeyup="renderLists()" style="margin:0;padding:10px 15px;border-radius:20px"></div>
-            <div class="panel-header" style="padding-top:5px;padding-bottom:5px;border-bottom:none">Chats <div class="btn-icon" onclick="promptChat()">+</div></div>
+            <div class="panel-header" style="padding-top:5px;padding-bottom:5px;border-bottom:none"><span data-i18n="tab_chats">Chats</span> <div class="btn-icon" onclick="promptChat()">+</div></div>
             <div class="list-area" id="list-chats">
                 <div class="tab-loader">
                     <div class="rail-letters"><span>m</span><span>o</span><span>R</span><span>e</span></div>
@@ -847,7 +888,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
         </div>
         <div id="tab-groups" class="tab-content" style="display:none">
             <div style="padding:20px 15px 5px 15px"><input type="text" id="group-search" class="form-input" placeholder="Search groups..." onkeyup="renderLists()" style="margin:0;padding:10px 15px;border-radius:20px"></div>
-            <div class="panel-header" style="padding-top:5px;padding-bottom:5px;border-bottom:none">Groups 
+            <div class="panel-header" style="padding-top:5px;padding-bottom:5px;border-bottom:none"><span data-i18n="tab_groups">Groups</span> 
                 <div style="display:flex;gap:5px">
                 <div class="btn-icon" onclick="discover('group')" title="Discover Groups">🌍</div>
                 <div class="btn-icon" onclick="createGroup()" title="Create Group">+</div>
@@ -862,7 +903,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
         </div>
         <div id="tab-channels" class="tab-content" style="display:none">
             <div style="padding:20px 15px 5px 15px"><input type="text" id="channel-search" class="form-input" placeholder="Search channels..." onkeyup="renderLists()" style="margin:0;padding:10px 15px;border-radius:20px"></div>
-            <div class="panel-header" style="padding-top:5px;padding-bottom:5px;border-bottom:none">Channels <div style="display:flex;gap:5px"><div class="btn-icon" onclick="discover('channel')" title="Discover Channels">🌍</div><div class="btn-icon" onclick="createChannel()" title="Create Channel">+</div></div></div>
+            <div class="panel-header" style="padding-top:5px;padding-bottom:5px;border-bottom:none"><span data-i18n="tab_channels">Channels</span> <div style="display:flex;gap:5px"><div class="btn-icon" onclick="discover('channel')" title="Discover Channels">🌍</div><div class="btn-icon" onclick="createChannel()" title="Create Channel">+</div></div></div>
             <div style="padding:0 15px 10px 15px"><button class="form-input" style="cursor:pointer;border-radius:20px;text-align:center;background:var(--bg);border:1px solid var(--border)" onclick="joinGroup()">Join via Code</button></div>
             <div class="list-area" id="list-channels">
                 <div class="tab-loader">
@@ -873,33 +914,43 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
         </div>
         <div id="tab-public" class="tab-content" style="display:none;height:100%">
             <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%">
-                <div style="font-size:1.2rem;color:#888">Online Users</div>
+                <div style="font-size:1.2rem;color:#888" data-i18n="online_users">Online Users</div>
                 <div id="online-count" style="font-size:4rem;font-weight:bold;color:var(--accent)">0</div>
             </div>
         </div>
         <div id="tab-settings" class="tab-content" style="display:none">
-            <div class="panel-header">Settings</div>
+            <div class="panel-header" data-i18n="tab_settings">Settings</div>
             <div class="settings-panel">
                 <div class="avatar" id="my-av" style="width:80px;height:80px;margin:0 auto;font-size:2rem"></div>
                 <h3 id="my-name"></h3>
                 <p id="my-date" style="color:#777;font-size:0.8rem"></p>
-                <div class="form-group"><label>Bio / Status</label><input class="form-input" id="set-bio" maxlength="50"></div>
-                <div class="form-group"><label>Avatar URL</label><input class="form-input" id="set-av"></div>
-                <div class="form-group"><label>New Password</label><input class="form-input" id="set-pw" type="password"></div>
-                <div class="form-group"><button class="btn-sec" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:4px;cursor:pointer;background:var(--panel);color:var(--text)" onclick="toggleTheme()">Toggle Dark/Light Mode</button></div>
-                <div class="form-group"><button class="btn-sec" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:4px;cursor:pointer;background:var(--panel);color:var(--text)" onclick="enableNotifs()">Enable Notifications</button></div>
-                <br><button class="btn-primary" onclick="saveSettings()">Save</button>
+                <div class="form-group"><label data-i18n="bio">Bio / Status</label><input class="form-input" id="set-bio" maxlength="50"></div>
+                <div class="form-group"><label data-i18n="avatar_url">Avatar URL</label><input class="form-input" id="set-av"></div>
+                <div class="form-group"><label data-i18n="new_pass">New Password</label><input class="form-input" id="set-pw" type="password"></div>
+                <div class="form-group"><label data-i18n="lang_select">Language</label><select id="set-lang" class="form-select" onchange="setLang(this.value)"><option value="en">English</option><option value="fa">فارسی</option></select></div>
+                <div class="form-group"><button class="btn-sec" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:4px;cursor:pointer;background:var(--panel);color:var(--text)" onclick="toggleTheme()" data-i18n="toggle_theme">Toggle Dark/Light Mode</button></div>
+                <div class="form-group"><button class="btn-sec" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:4px;cursor:pointer;background:var(--panel);color:var(--text)" onclick="enableNotifs()" data-i18n="enable_notif">Enable Notifications</button></div>
+                <br><button class="btn-primary" onclick="saveSettings()" data-i18n="save">Save</button>
+                
+                <div class="mobile-only" style="margin-top:30px;border-top:1px solid var(--border);padding-top:20px">
+                    <h3 data-i18n="tab_about">About</h3>
+                    <p style="color:#888;">moreweb Messenger v0.0.1</p>
+                    <button class="btn-sec" style="margin-bottom:20px;cursor:pointer;padding:8px 16px;border-radius:20px" onclick="checkUpdates()" data-i18n="check_updates">Check for Updates</button><br>
+                    <a href="https://github.com/iWebbIO/php-messenger" target="_blank" class="about-link">GitHub Repository</a>
+                    <br><br>
+                    <button class="btn-sec" style="width:100%;padding:10px;border:1px solid #f55;color:#f55;border-radius:4px;cursor:pointer;background:transparent" onclick="if(confirm('Logout?'))location.href='?action=logout'" data-i18n="logout">Logout</button>
+                </div>
             </div>
         </div>
         <!-- ABOUT TAB -->
-        <div id="tab-about" class="tab-content" style="display:none">
-            <div class="panel-header">About</div>
+        <div id="tab-about" class="tab-content desktop-only" style="display:none">
+            <div class="panel-header" data-i18n="tab_about">About</div>
             <div style="padding:20px; text-align:center; color:#ccc;">
                 <h2>moreweb Messenger</h2>
                 <p style="color:#888;">Version 0.0.1</p>
-                <p>A secure, self-contained messenger with ephemeral server storage and local history persistence.</p>
+                <p data-i18n="about_desc">A secure, self-contained messenger with ephemeral server storage and local history persistence.</p>
                 <br>
-                <button class="btn-sec" style="margin-bottom:20px;cursor:pointer;padding:8px 16px;border-radius:20px" onclick="checkUpdates()">Check for Updates</button><br>
+                <button class="btn-sec" style="margin-bottom:20px;cursor:pointer;padding:8px 16px;border-radius:20px" onclick="checkUpdates()" data-i18n="check_updates">Check for Updates</button><br>
                 <a href="https://github.com/iWebbIO/php-messenger" target="_blank" class="about-link">
                     <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" style="vertical-align:middle"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
                     GitHub Repository
@@ -926,9 +977,9 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
                 <div class="btn-icon menu-btn" onclick="toggleMenu(event)">
                     <svg viewBox="0 0 24 24" width="24" fill="currentColor"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
                     <div class="menu-dropdown" id="chat-menu">
-                        <div class="menu-item" onclick="clearChat()">Clear History</div>
-                        <div class="menu-item red-text" onclick="deleteChat()">Delete Chat</div>
-                        <div class="menu-item" onclick="exportChat()">Export Chat</div>
+                        <div class="menu-item" onclick="clearChat()" data-i18n="clear_history">Clear History</div>
+                        <div class="menu-item red-text" onclick="deleteChat()" data-i18n="delete_chat">Delete Chat</div>
+                        <div class="menu-item" onclick="exportChat()" data-i18n="export_chat">Export Chat</div>
                     </div>
                 </div>
             </div>
@@ -947,25 +998,6 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
         </div>
 
         <div class="input-area" id="input-box" style="visibility:hidden">
-            <!-- Attachment Menu -->
-            <div id="att-menu" class="att-menu">
-                <div class="att-item" onclick="pickMedia('camera')">
-                    <div class="att-icon att-cam"><svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" style="display:none"/><path d="M9 2L7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2h-3.17L15 2H9zm3 15c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5z"/></svg></div>
-                    <span class="att-label">Camera</span>
-                </div>
-                <div class="att-item" onclick="pickMedia('gallery')">
-                    <div class="att-icon att-gal"><svg viewBox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg></div>
-                    <span class="att-label">Gallery</span>
-                </div>
-                <div class="att-item" onclick="pickMedia('file')">
-                    <div class="att-icon att-file"><svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg></div>
-                    <span class="att-label">Document</span>
-                </div>
-                <div class="att-item" onclick="sendLocation()">
-                    <div class="att-icon att-loc"><svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg></div>
-                    <span class="att-label">Location</span>
-                </div>
-            </div>
             <input type="file" id="file" hidden onchange="uploadFile(this)">
             <div class="input-wrapper">
                 <div class="reply-ctx" id="reply-ui">
@@ -988,6 +1020,25 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
                 <svg id="icon-send" viewBox="0 0 24 24" width="24" fill="currentColor" style="display:none"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
             </button>
         </div>
+        <!-- Attachment Menu -->
+        <div id="att-menu" class="att-menu">
+            <div class="att-item" onclick="pickMedia('camera')">
+                <div class="att-icon att-cam"><svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" style="display:none"/><path d="M9 2L7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2h-3.17L15 2H9zm3 15c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5z"/></svg></div>
+                <span class="att-label" data-i18n="camera">Camera</span>
+            </div>
+            <div class="att-item" onclick="pickMedia('gallery')">
+                <div class="att-icon att-gal"><svg viewBox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg></div>
+                <span class="att-label" data-i18n="gallery">Gallery</span>
+            </div>
+            <div class="att-item" onclick="pickMedia('file')">
+                <div class="att-icon att-file"><svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg></div>
+                <span class="att-label" data-i18n="file">Document</span>
+            </div>
+            <div class="att-item" onclick="sendLocation()">
+                <div class="att-icon att-loc"><svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg></div>
+                <span class="att-label" data-i18n="location">Location</span>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -1000,6 +1051,58 @@ let mediaRec=null, audChunks=[], recMime='';
 let pendingFile = null;
 let currentAudio=null, currentBtn=null, updateInterval=null;
 let S = { tab:'chats', id:null, type:null, reply:null, ctx:null, dms:{}, groups:{}, online:[], notifs:[], keys:{pub:null,priv:null}, e2ee:{}, we:{active:false, ready:[]}, scroll:{} };
+
+const TR = {
+    en: {
+        tab_chats: "Chats", tab_groups: "Groups", tab_channels: "Channels", tab_public: "Public", tab_settings: "Settings", tab_about: "About",
+        search_chats: "Search chats...", search_groups: "Search groups...", search_channels: "Search channels...",
+        online_users: "Online Users", bio: "Bio / Status", avatar_url: "Avatar URL", new_pass: "New Password", lang_select: "Language",
+        toggle_theme: "Toggle Dark/Light Mode", enable_notif: "Enable Notifications", save: "Save", logout: "Logout", check_updates: "Check for Updates",
+        about_desc: "A secure, self-contained messenger with ephemeral server storage and local history persistence.",
+        clear_history: "Clear History", delete_chat: "Delete Chat", export_chat: "Export Chat",
+        camera: "Camera", gallery: "Gallery", file: "Document", location: "Location",
+        type_msg: "Type a message...", type_enc: "Type an encrypted message...", only_owner: "Only owner can post",
+        start_chat: "Start chatting", join_code: "Join via Code",
+        cancel: "CANCEL", preview: "Preview", send: "Send"
+    },
+    fa: {
+        tab_chats: "گفتگوها", tab_groups: "گروه‌ها", tab_channels: "کانال‌ها", tab_public: "عمومی", tab_settings: "تنظیمات", tab_about: "درباره",
+        search_chats: "جستجوی گفتگو...", search_groups: "جستجوی گروه...", search_channels: "جستجوی کانال...",
+        online_users: "کاربران آنلاین", bio: "بیوگرافی / وضعیت", avatar_url: "آدرس آواتار", new_pass: "رمز عبور جدید", lang_select: "زبان / Language",
+        toggle_theme: "تغییر پوسته (تاریک/روشن)", enable_notif: "فعال‌سازی اعلان‌ها", save: "ذخیره", logout: "خروج", check_updates: "بررسی بروزرسانی",
+        about_desc: "یک پیام‌رسان امن و مستقل با ذخیره‌سازی موقت سرور و پایداری تاریخچه محلی.",
+        clear_history: "پاک کردن تاریخچه", delete_chat: "حذف گفتگو", export_chat: "خروجی گرفتن",
+        camera: "دوربین", gallery: "گالری", file: "سند", location: "موقعیت",
+        type_msg: "پیامی بنویسید...", type_enc: "پیام رمزگذاری شده...", only_owner: "فقط مالک می‌تواند پست بگذارد",
+        start_chat: "شروع گفتگو", join_code: "عضویت با کد",
+        cancel: "لغو", preview: "پیش‌نمایش", send: "ارسال"
+    }
+};
+let curLang = localStorage.getItem('mw_lang') || 'en';
+
+function setLang(l) {
+    curLang = l; localStorage.setItem('mw_lang', l);
+    document.body.classList.toggle('rtl', l=='fa');
+    document.getElementById('set-lang').value = l;
+    applyLang();
+    renderLists(); // Re-render lists to update static texts inside them if any
+    if(S.id) openChat(S.type, S.id); // Re-open chat to update placeholder
+}
+
+function applyLang() {
+    const t = TR[curLang];
+    document.querySelectorAll('[data-i18n]').forEach(el => {
+        if(t[el.dataset.i18n]) el.innerText = t[el.dataset.i18n];
+    });
+    ['chat-search', 'group-search', 'channel-search'].forEach(id => {
+        let el = document.getElementById(id);
+        if(el) el.placeholder = t['search_' + id.split('-')[0] + 's'];
+    });
+    // Update specific elements
+    let joinBtn = document.querySelector('#tab-groups button'); if(joinBtn) joinBtn.innerText = t.join_code;
+    let joinBtnC = document.querySelector('#tab-channels button'); if(joinBtnC) joinBtnC.innerText = t.join_code;
+    let cancelRec = document.querySelector('#rec-ui span[onclick*="stopRec(false)"]'); if(cancelRec) cancelRec.innerText = t.cancel;
+}
 
 // Mobile Viewport Fix
 function setVh() { document.documentElement.style.setProperty('--vh', (window.innerHeight*0.01)+'px'); }
@@ -1131,6 +1234,7 @@ async function init(){
             } catch(e){ console.error("Migration error", e); }
         }
         if(localStorage.getItem('mw_theme')=='light') document.body.classList.add('light-mode');
+        setLang(curLang);
         pollLoop();
     } catch(e) { console.error("Init failed", e); alert("App failed to initialize: " + e.message); }
 }
@@ -1446,6 +1550,7 @@ function switchTab(t){
 async function renderLists(){
     try {
         let dh='';
+        const t = TR[curLang];
         let filter = document.getElementById('chat-search').value.toLowerCase();
         let chatFilter = document.getElementById('chat-search').value.toLowerCase();
         let groupFilter = document.getElementById('group-search') ? document.getElementById('group-search').value.toLowerCase() : '';
@@ -1459,7 +1564,7 @@ async function renderLists(){
                 let h = await get('dm', u);
                 let lock = S.e2ee[u] ? '<svg viewBox="0 0 24 24" width="14" style="vertical-align:middle;margin-left:4px;fill:var(--accent)"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-9-2c0-1.66 1.34-3 3-3s3 1.34 3 3v2H9V6zm9 14H6V10h12v10zm-6-3c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2z"/></svg>' : '';
                 let lastMsg = h.length ? h[h.length-1] : null;
-                let last = 'Start chatting';
+                let last = t.start_chat;
                 if(lastMsg) {
                     if(lastMsg.type === 'image') last = '📷 Image';
                     else if(lastMsg.type === 'audio') last = '🎤 Voice Message';
@@ -1516,6 +1621,7 @@ async function openChat(t,i){
     document.getElementById('main-view').classList.add('active');
         document.getElementById('nav-panel').classList.add('hidden');
     let tit=i, sub='', av='';
+    const langT = TR[curLang];
     let canPost = true;
     if(t=='dm'){
         let ou=S.online.find(x=>x.username==i);
@@ -1533,7 +1639,7 @@ async function openChat(t,i){
     }
     document.getElementById('chat-title').innerText=tit;
     document.getElementById('chat-sub').innerText=sub;
-    document.getElementById('txt').placeholder = (t=='dm' && S.e2ee[S.id]) ? "Type an encrypted message..." : (canPost ? "Type a message..." : "Only owner can post");
+    document.getElementById('txt').placeholder = (t=='dm' && S.e2ee[S.id]) ? langT.type_enc : (canPost ? langT.type_msg : langT.only_owner);
     document.getElementById('input-box').style.visibility = canPost ? 'visible' : 'hidden';
     toggleMainBtn();
     if(window.innerWidth > 768) setTimeout(()=>document.getElementById('txt').focus(), 50);
@@ -1662,6 +1768,7 @@ async function send(){
 
 // --- CONTEXT MENU ---
 function showContextMenu(e, type, data) {
+    const t = TR[curLang];
     e.preventDefault();
     S.ctx = {type, data};
     let menu = document.getElementById('ctx-menu');
@@ -1681,12 +1788,12 @@ function showContextMenu(e, type, data) {
         <div class="ctx-item" onclick="ctxAction('pin')">Pin Message</div>
         <div class="ctx-item" onclick="ctxAction('details')">Details</div>
         <div class="ctx-separator"></div>
-        <div class="ctx-item red-text" onclick="ctxAction('delete')">Delete</div>`;
+        <div class="ctx-item red-text" onclick="ctxAction('delete')">Delete</div>`; // Translations for context menu can be added similarly
     } else if(type == 'chat_list') {
         html = `<div class="ctx-item" onclick="ctxAction('open')">Open</div>
-        <div class="ctx-item" onclick="ctxAction('clear')">Clear History</div>
+        <div class="ctx-item" onclick="ctxAction('clear')">${t.clear_history}</div>
         <div class="ctx-separator"></div>
-        <div class="ctx-item red-text" onclick="ctxAction('del_chat')">Delete Chat</div>`;
+        <div class="ctx-item red-text" onclick="ctxAction('del_chat')">${t.delete_chat}</div>`;
     } else {
         html = `<div class="ctx-item" onclick="ctxAction('theme')">Toggle Theme</div>
         <div class="ctx-item" onclick="ctxAction('settings')">Settings</div>
@@ -1805,6 +1912,7 @@ function handleAttClick(e) {
         toggleNotif(false);
         document.getElementById('chat-menu').style.display='none';
         m.style.display = wasVisible ? 'none' : 'grid';
+        if(!wasVisible) document.getElementById('txt').blur();
         e.stopPropagation();
     }
 }
@@ -2062,6 +2170,7 @@ function esc(t){ return t?t.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/
 
 document.getElementById('txt').onkeydown=e=>{if(e.key=='Enter' && !e.shiftKey){e.preventDefault();send()}};
 document.getElementById('txt').onkeydown=e=>{if(e.key=='Enter' && !e.shiftKey){e.preventDefault();handleMainBtn()}};
+document.getElementById('txt').addEventListener('focus', () => { document.getElementById('att-menu').style.display = 'none'; });
 
 async function startRec(){
     try{

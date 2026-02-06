@@ -595,13 +595,11 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
     .e2ee-on { color: var(--accent); }
     * { -webkit-tap-highlight-color: transparent; }
     body { margin:0; font-family:'Calibri', 'Poppins', sans-serif; background:var(--bg); color:var(--text); height:100vh; height:calc(var(--vh, 1vh) * 100); display:flex; overflow:hidden; overscroll-behavior-y: none; }
-    .rtl { direction: rtl; text-align: right; font-family: 'Calibri', 'Tahoma', sans-serif; }
-    .rtl .nav-rail { border-right: none; border-left: 1px solid var(--border); }
-    .rtl .nav-panel { border-right: none; border-left: 1px solid var(--border); }
+    .rtl { font-family: 'Calibri', 'Tahoma', sans-serif; }
+    .rtl .nav-panel, .rtl .main-view, .rtl .modal-box, .rtl .box { direction: rtl; text-align: right; }
     .rtl .list-item.active { border-left: none; border-right: 4px solid var(--accent); padding-left: 15px; padding-right: 11px; }
     .rtl .avatar { margin-right: 0; margin-left: 12px; }
     .rtl .msg-meta { text-align: left; }
-    .rtl .rail-btn svg { transform: scaleX(-1); }
     
     /* Custom Scrollbar */
     ::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -765,7 +763,6 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
             z-index: 30;
             padding-bottom: env(safe-area-inset-bottom);
         }
-        .rtl .nav-rail { border-left: none; border-top: 1px solid var(--border); }
         .rail-btn { margin-bottom: 0; width: auto; height: 100%; flex: 1; border-radius: 0; }
         .rail-btn.active { background: transparent; color: var(--accent); position: relative; }
         .rail-btn.active::after { content:''; position:absolute; top:0; left:0; width:100%; height:3px; background:var(--accent); }
@@ -778,7 +775,6 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
             z-index: 5;
             position: absolute;
         }
-        .rtl .nav-panel { border-left: none; }
         .nav-panel.hidden { display: flex; }
         
         .main-view { 
@@ -788,7 +784,6 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
             transform: translateX(100%); transition: transform 0.3s cubic-bezier(0.4, 0.0, 0.2, 1);
             background: var(--bg);
         }
-        .rtl .main-view { transform: translateX(-100%); }
         .main-view.active { transform: translateX(0); }
         
         .back-btn { display: flex; align-items: center; justify-content: center; margin-right: 10px; font-size: 1.5rem; padding: 5px; }
@@ -1292,7 +1287,7 @@ async function poll(){
         if(d.profile){
             document.getElementById('my-av').style.backgroundImage=`url('${d.profile.avatar}')`;
             document.getElementById('my-name').innerText=d.profile.username;
-            document.getElementById('set-bio').value=d.profile.bio||'';
+            if(document.activeElement !== document.getElementById('set-bio')) document.getElementById('set-bio').value=d.profile.bio||'';
             document.getElementById('my-date').innerText="Joined: "+new Date(d.profile.joined_at*1000).toLocaleDateString();
         }
         for(let m of d.dms){

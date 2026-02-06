@@ -694,6 +694,28 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
     .lightbox-controls { position:absolute; top:15px; right:15px; display:flex; gap:15px; z-index:2001; }
     .lb-btn { width:40px; height:40px; background:rgba(255,255,255,0.1); border-radius:50%; display:flex; align-items:center; justify-content:center; color:#fff; cursor:pointer; backdrop-filter:blur(10px); }
     
+    /* Media Preview */
+    .media-preview { position:fixed; top:0; left:0; width:100%; height:100%; background:#000; z-index:3000; display:none; flex-direction:column; }
+    .preview-header { padding:15px; display:flex; justify-content:space-between; align-items:center; color:#fff; background:rgba(0,0,0,0.3); }
+    .preview-content { flex:1; display:flex; align-items:center; justify-content:center; overflow:hidden; position:relative; }
+    .preview-content img { max-width:100%; max-height:100%; object-fit:contain; }
+    .preview-footer { padding:20px; display:flex; justify-content:space-between; align-items:center; background:rgba(0,0,0,0.5); }
+    .toast { position:fixed; top:80px; left:50%; transform:translateX(-50%); background:rgba(30,30,30,0.9); color:#fff; padding:8px 16px; border-radius:20px; font-size:0.85rem; z-index:4000; opacity:0; transition:opacity 0.3s; pointer-events:none; box-shadow:0 4px 12px rgba(0,0,0,0.3); backdrop-filter:blur(5px); border:1px solid rgba(255,255,255,0.1); }
+    .toast.show { opacity:1; }
+
+    /* Attachment Menu */
+    .att-menu { position:absolute; bottom:75px; left:15px; background:var(--panel); border:1px solid var(--border); border-radius:16px; padding:20px; display:none; grid-template-columns: repeat(3, 1fr); gap:25px; box-shadow:0 10px 40px rgba(0,0,0,0.6); z-index:100; animation: slideUp 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+    .att-item { display:flex; flex-direction:column; align-items:center; cursor:pointer; gap:8px; }
+    .att-icon { width:56px; height:56px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#fff; transition:transform 0.2s; box-shadow: 0 4px 10px rgba(0,0,0,0.2); }
+    .att-icon svg { width: 28px; height: 28px; fill: currentColor; }
+    .att-icon:active { transform:scale(0.95); }
+    .att-label { font-size: 0.8rem; color: var(--text); opacity: 0.9; font-weight: 500; }
+    .att-cam { background: linear-gradient(135deg, #FF512F, #DD2476); }
+    .att-gal { background: linear-gradient(135deg, #8E2DE2, #4A00E0); }
+    .att-file { background: linear-gradient(135deg, #11998e, #38ef7d); }
+    .att-loc { background: linear-gradient(135deg, #ff9966, #ff5e62); }
+    @keyframes slideUp { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    
     @keyframes sequentialReplace { 0%, 100% { opacity: 0; transform: translateX(-50%) scale(0.95); } 15% { opacity: 1; transform: translateX(-50%) scale(1); } 30% { opacity: 1; transform: translateX(-50%) scale(1); } 45% { opacity: 0; transform: translateX(-50%) scale(0.95); } }
     @keyframes pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.3); opacity: 0.7; } }
 
@@ -747,6 +769,19 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
 <!-- LOADING SYSTEM -->
 <div id="progress-bar-container">
     <div id="progress-bar"></div>
+</div>
+
+<!-- TOAST -->
+<div id="toast" class="toast"></div>
+
+<!-- MEDIA PREVIEW -->
+<div id="media-preview" class="media-preview">
+    <div class="preview-header"><button class="btn-icon" onclick="closePreview()">&times;</button><span>Preview</span><div style="width:40px"></div></div>
+    <div class="preview-content"><img id="preview-img" src=""></div>
+    <div class="preview-footer">
+        <div style="color:#aaa;font-size:0.8rem" id="preview-info"></div>
+        <button class="btn-primary" onclick="sendPreview()">Send</button>
+    </div>
 </div>
 
 <!-- MODAL SYSTEM -->
@@ -912,8 +947,27 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
         </div>
 
         <div class="input-area" id="input-box" style="visibility:hidden">
-            <button class="btn-icon" id="btn-att" onclick="document.getElementById('file').click()">
-                <svg viewBox="0 0 24 24" width="24" fill="currentColor"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+            <!-- Attachment Menu -->
+            <div id="att-menu" class="att-menu">
+                <div class="att-item" onclick="pickMedia('camera')">
+                    <div class="att-icon att-cam"><svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" style="display:none"/><path d="M9 2L7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2h-3.17L15 2H9zm3 15c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5z"/></svg></div>
+                    <span class="att-label">Camera</span>
+                </div>
+                <div class="att-item" onclick="pickMedia('gallery')">
+                    <div class="att-icon att-gal"><svg viewBox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg></div>
+                    <span class="att-label">Gallery</span>
+                </div>
+                <div class="att-item" onclick="pickMedia('file')">
+                    <div class="att-icon att-file"><svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg></div>
+                    <span class="att-label">Document</span>
+                </div>
+                <div class="att-item" onclick="sendLocation()">
+                    <div class="att-icon att-loc"><svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg></div>
+                    <span class="att-label">Location</span>
+                </div>
+            </div>
+            <button class="btn-icon" id="btn-att" onclick="handleAttClick(event)">
+                <svg viewBox="0 0 24 24" width="24" fill="currentColor"><path d="M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5a2.5 2.5 0 0 1 5 0v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5a2.5 2.5 0 0 0 5 0V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z"/></svg>
             </button>
             <input type="file" id="file" hidden onchange="uploadFile(this)">
             <button class="btn-icon" id="btn-mic" onclick="startRec()">
@@ -927,8 +981,8 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
                 </div>
                 <div id="rec-ui" style="display:none;align-items:center;height:40px;background:#333;border-radius:20px;padding:0 15px;color:#f55">
                     <span style="flex:1">Recording...</span>
-                    <span onclick="stopRec(false)" style="cursor:pointer;margin-right:15px;color:#ccc">&times;</span>
-                    <span onclick="stopRec(true)" style="cursor:pointer;color:var(--accent)">&#10004;</span>
+                    <span onclick="stopRec(false)" style="cursor:pointer;margin-right:15px;color:#ccc;letter-spacing:0.2em;text-align:center">C A N C E L</span>
+                    <button onclick="stopRec(true)" class="btn-icon" style="background:var(--accent);color:#fff;width:45px;height:45px;border-radius:50%"><svg viewBox="0 0 24 24"><path d="M21 7L9 19l-5.5-5.5L5 12.5 9 16.5 19 6l2 1z"/></svg></button>
                 </div>
                 <textarea id="txt" rows="1" placeholder="Type a message..." enterkeyhint="send"></textarea>
             </div>
@@ -945,6 +999,7 @@ const CSRF_TOKEN = "<?php echo $_SESSION['csrf_token']; ?>";
 let lastTyping = 0;
 let lastRead = 0;
 let mediaRec=null, audChunks=[], recMime='';
+let pendingFile = null;
 let currentAudio=null, currentBtn=null, updateInterval=null;
 let S = { tab:'chats', id:null, type:null, reply:null, ctx:null, dms:{}, groups:{}, online:[], notifs:[], keys:{pub:null,priv:null}, e2ee:{}, we:{active:false, ready:[]}, scroll:{} };
 
@@ -1109,6 +1164,13 @@ async function req(act, data) {
     });
     if(act!='poll' && act!='typing') endProg();
     return r;
+}
+
+function showToast(msg) {
+    let t = document.getElementById('toast');
+    t.innerText = msg;
+    t.classList.add('show');
+    setTimeout(()=>t.classList.remove('show'), 3000);
 }
 
 // --- CORE ---
@@ -1654,7 +1716,7 @@ async function ctxAction(act, arg) {
         if(act=='react') await sendReact(m.timestamp, arg);
         else if(act=='reply') { S.reply=m.timestamp; document.getElementById('reply-ui').style.display='flex'; document.getElementById('reply-txt').innerText="Replying to "+m.from_user; document.getElementById('del-btn').style.display='none'; document.getElementById('txt').focus(); }
         else if(act=='forward') promptModal("Forward", "Username:", u=>{ if(u) req('send',{message:m.message,type:m.type,extra:m.extra_data,to_user:u}); });
-        else if(act=='copy') { if(m.type=='text') navigator.clipboard.writeText(m.message); }
+        else if(act=='copy') { if(m.type=='text') { navigator.clipboard.writeText(m.message); showToast('Copied to clipboard'); } }
         else if(act=='pin') { let h=await get(S.type,S.id); let t=h.find(x=>x.timestamp==m.timestamp); if(t){t.pinned=!t.pinned; await save(S.type,S.id,h); renderChat();} }
         else if(act=='details') alertModal("Details", `From: ${m.from_user}\nSent: ${new Date(m.timestamp*1000).toLocaleString()}`);
         else if(act=='delete') { if(m.from_user!=ME)return; S.reply=m.timestamp; await deleteMsg(); }
@@ -1734,13 +1796,48 @@ function enableNotifs(){
     });
 }
 
+function handleAttClick(e) {
+    if(window.innerWidth > 768) {
+        pickMedia('file');
+    } else {
+        let m = document.getElementById('att-menu');
+        let wasVisible = m.style.display=='grid';
+        toggleNotif(false);
+        document.getElementById('chat-menu').style.display='none';
+        m.style.display = wasVisible ? 'none' : 'grid';
+        e.stopPropagation();
+    }
+}
+function pickMedia(type) {
+    let f = document.getElementById('file');
+    f.value = ''; f.removeAttribute('capture'); f.removeAttribute('accept');
+    if(type === 'camera') { f.accept = 'image/*'; f.setAttribute('capture', 'environment'); }
+    else if(type === 'gallery') { f.accept = 'image/*'; }
+    f.click();
+    document.getElementById('att-menu').style.display='none';
+}
+function sendLocation() {
+    if(!navigator.geolocation) return alertModal('Error', 'Geolocation not supported');
+    startProg();
+    navigator.geolocation.getCurrentPosition(pos => {
+        endProg();
+        let link = `https://www.google.com/maps?q=${pos.coords.latitude},${pos.coords.longitude}`;
+        let ts = Math.floor(Date.now()/1000);
+        let ld = {message: link, type: 'text', timestamp: ts};
+        if(S.type=='dm') ld.to_user=S.id; else if(S.type=='group'||S.type=='channel') ld.group_id=S.id; else ld.group_id=-1;
+        req('send', ld);
+        store(S.type,S.id,{from_user:ME,message:link,type:'text',timestamp:ts});
+        scrollToBottom(true);
+        document.getElementById('att-menu').style.display='none';
+    }, err => { endProg(); alertModal('Error', 'Location access denied'); });
+}
+
 async function uploadFile(inp){
     let f=inp.files[0]; if(!f)return;
+    inp.value = ''; // Reset
     
-    // Compress Image
-    let fileToSend = f;
-    let dataUrl = null;
     if(f.type.startsWith('image/') && f.type !== 'image/gif'){
+        startProg();
         try {
             let img = await new Promise((res,rej)=>{let i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=URL.createObjectURL(f);});
             let cvs = document.createElement('canvas');
@@ -1748,36 +1845,74 @@ async function uploadFile(inp){
             if(w>max||h>max){ if(w>h){h*=max/w;w=max;}else{w*=max/h;h=max;} }
             cvs.width=w; cvs.height=h;
             cvs.getContext('2d').drawImage(img,0,0,w,h);
-            dataUrl = cvs.toDataURL('image/jpeg', 0.8);
             let blob = await new Promise(r=>cvs.toBlob(r,'image/jpeg',0.8));
-            fileToSend = new File([blob], f.name, {type:'image/jpeg'});
-        } catch(e){ console.log("Compression failed", e); }
+            pendingFile = new File([blob], f.name, {type:'image/jpeg'});
+            
+            // Show Preview
+            document.getElementById('preview-img').src = URL.createObjectURL(pendingFile);
+            document.getElementById('preview-info').innerText = `${(pendingFile.size/1024).toFixed(1)} KB`;
+            document.getElementById('media-preview').style.display = 'flex';
+        } catch(e){ console.log("Compression failed", e); alertModal('Error', 'Image processing failed'); }
+        endProg();
+    } else {
+        sendFile(f);
     }
+}
+
+function sendPreview() {
+    if(pendingFile) sendFile(pendingFile);
+    closePreview();
+}
+
+function closePreview() {
+    document.getElementById('media-preview').style.display = 'none';
+    let img = document.getElementById('preview-img');
+    if(img.src) URL.revokeObjectURL(img.src);
+    document.getElementById('preview-img').src = '';
+    pendingFile = null;
+}
+
+async function sendFile(fileToSend) {
+    startProg();
+    let ts = Math.floor(Date.now()/1000);
+    
+    // Optimistic Render
+    let r = new FileReader();
+    r.onload = async () => {
+        let type = fileToSend.type.startsWith('image/') ? 'image' : 'file';
+        await store(S.type,S.id,{from_user:ME,message:r.result,type:type,timestamp:ts,extra_data:fileToSend.name, pending:true});
+        scrollToBottom(true);
+    };
+    r.readAsDataURL(fileToSend);
 
     let fd = new FormData();
     fd.append('file', fileToSend);
-    let ts = Math.floor(Date.now()/1000);
     fd.append('timestamp', ts);
     if(S.type=='dm') fd.append('to_user', S.id);
     else if(S.type=='group'||S.type=='channel') fd.append('group_id', S.id);
     else fd.append('group_id', -1);
 
-    fetch('?action=upload_msg', { method:'POST', body:fd, headers:{'X-CSRF-Token': CSRF_TOKEN} })
-    .then(r=>r.json())
-    .then(d=>{
-        if(d.status!='success') alertModal('Error', d.message||'Upload failed');
-    });
-    
-    // Optimistic render (read locally)
-    if(dataUrl) {
-        await store(S.type,S.id,{from_user:ME,message:dataUrl,type:'image',timestamp:ts,extra_data:f.name});
-    } else {
-        let r = new FileReader();
-        r.onload = async () => {
-            let type = f.type.startsWith('image/') ? 'image' : 'file';
-            await store(S.type,S.id,{from_user:ME,message:r.result,type:type,timestamp:ts,extra_data:f.name});
-        };
-        r.readAsDataURL(f);
+    try {
+        let res = await fetch('?action=upload_msg', { method:'POST', body:fd, headers:{'X-CSRF-Token': CSRF_TOKEN} });
+        let d = await res.json();
+        endProg();
+        if(d.status!='success') {
+            alertModal('Error', d.message||'Upload failed');
+            let h = await get(S.type, S.id);
+            let idx = h.findIndex(x => x.timestamp == ts && x.extra_data == fileToSend.name);
+            if(idx!=-1) { h.splice(idx, 1); await save(S.type, S.id, h); renderChat(); }
+        } else {
+            let h = await get(S.type, S.id);
+            let m = h.find(x => x.timestamp == ts && x.extra_data == fileToSend.name);
+            if(m) { delete m.pending; await save(S.type, S.id, h); renderChat(); }
+        }
+    } catch(e) {
+        endProg();
+        console.error(e);
+        alertModal('Error', 'Upload failed');
+        let h = await get(S.type, S.id);
+        let idx = h.findIndex(x => x.timestamp == ts && x.extra_data == fileToSend.name);
+        if(idx!=-1) { h.splice(idx, 1); await save(S.type, S.id, h); renderChat(); }
     }
 }
 
@@ -2034,6 +2169,7 @@ window.onclick=(e)=>{
     if(!e.target.closest('.notif-btn') && !e.target.closest('.menu-btn'))toggleNotif(false);
     if(!e.target.closest('.menu-btn'))document.getElementById('chat-menu').style.display='none';
     if(!e.target.closest('.ctx-menu') && !e.target.closest('.msg')) document.getElementById('ctx-menu').style.display='none';
+    if(!e.target.closest('#att-menu') && !e.target.closest('#btn-att') && document.getElementById('att-menu')) document.getElementById('att-menu').style.display='none';
 };
 window.oncontextmenu = (e) => {
     if(e.defaultPrevented) return;
@@ -2043,6 +2179,7 @@ window.oncontextmenu = (e) => {
 window.onkeydown = (e) => {
     if(e.key === 'Escape') {
         if(document.getElementById('app-modal').style.display === 'flex') document.getElementById('modal-cancel').click();
+        else if(document.getElementById('media-preview').style.display === 'flex') closePreview();
         else if(document.getElementById('main-view').classList.contains('active')) closeChat();
     }
 };
@@ -2066,6 +2203,9 @@ mv.addEventListener('touchend', e => {
     let tEX=e.changedTouches[0].screenX, tEY=e.changedTouches[0].screenY;
     if(tEX - tSX > 80 && Math.abs(tEY - tSY) < 60 && tSX < 50) closeChat();
 }, {passive:true});
+
+window.addEventListener('online', () => showToast('Back online'));
+window.addEventListener('offline', () => showToast('You are offline'));
 
 if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
 init().catch(e=>console.error(e));

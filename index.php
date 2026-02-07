@@ -143,7 +143,7 @@ if ($action === 'sw') {
 if ($action === 'get_profile') {
     header('Content-Type: application/json');
     $u = $_GET['u'] ?? '';
-    $stmt = $db->prepare("SELECT username, avatar, bio, joined_at, last_seen FROM users WHERE username = ?");
+    $stmt = $db->prepare("SELECT username, avatar, bio, joined_at, last_seen, public_key FROM users WHERE username = ?");
     $stmt->execute([$u]);
     echo json_encode($stmt->fetch() ?: ['status'=>'error']);
     exit;
@@ -852,6 +852,17 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
     .splash-screen .word span:nth-child(2) { animation: letterAppear 0.3s ease-out 0.15s forwards; }
     .splash-screen .word span:nth-child(3) { animation: letterAppear 0.3s ease-out 0.25s forwards; }
     .splash-screen .word span:nth-child(4) { animation: letterAppear 0.3s ease-out 0.30s forwards; }
+
+    /* Connection Indicator */
+    .conn-indicator { padding: 6px 0 0 0; height: 22px; display: flex; align-items: center; justify-content: center; transition: 0.3s; flex-shrink: 0; }
+    .conn-more { font-family: 'Poppins', sans-serif; font-weight: 100; font-size: 1.4rem; letter-spacing: 0.1em; color: #fff; text-shadow: 0 0 15px #bf00ff; display: none; gap: 5px; line-height: 1; }
+    .conn-more span { display: inline-block; animation: letterAppear 0.5s ease-out forwards; }
+    .conn-text { font-size: 0.75rem; color: #888; font-style: italic; display: block; font-family: 'Roboto', sans-serif; font-weight: 300; letter-spacing: 0.05em; }
+    .conn-dots::after { content: '.'; animation: dots 1.5s infinite; display: inline-block; width: 1.5em; text-align: left; }
+    .status-connected .conn-more { display: flex; }
+    .status-connected .conn-text { display: none; }
+    .light-mode .conn-more { color: #333; text-shadow: 0 0 10px rgba(168, 85, 247, 0.5); }
+    @keyframes dots { 0% { content: '.'; } 33% { content: '..'; } 66% { content: '...'; } }
 </style>
 </head>
 <body>
@@ -929,8 +940,12 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
 
     <!-- LIST PANEL -->
     <div class="nav-panel" id="nav-panel">
+        <div id="conn-indicator" class="conn-indicator">
+            <div class="conn-more"><span>m</span><span>o</span><span>r</span><span>e</span></div>
+            <div class="conn-text">Connecting<span class="conn-dots"></span></div>
+        </div>
         <div id="tab-chats" class="tab-content">
-            <div style="padding:20px 15px 5px 15px"><input type="text" id="chat-search" class="form-input" placeholder="Search chats..." onkeyup="renderLists()" style="margin:0;padding:10px 15px;border-radius:20px"></div>
+            <div style="padding:10px 15px 5px 15px"><input type="text" id="chat-search" class="form-input" placeholder="Search chats..." onkeyup="renderLists()" style="margin:0;padding:10px 15px;border-radius:20px"></div>
             <div class="panel-header" style="padding-top:5px;padding-bottom:5px;border-bottom:none"><span data-i18n="tab_chats">Chats</span> <div class="btn-icon" onclick="promptChat()">+</div></div>
             <div class="list-area" id="list-chats">
                 <div class="tab-loader">
@@ -940,7 +955,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
             </div>
         </div>
         <div id="tab-groups" class="tab-content" style="display:none">
-            <div style="padding:20px 15px 5px 15px"><input type="text" id="group-search" class="form-input" placeholder="Search groups..." onkeyup="renderLists()" style="margin:0;padding:10px 15px;border-radius:20px"></div>
+            <div style="padding:10px 15px 5px 15px"><input type="text" id="group-search" class="form-input" placeholder="Search groups..." onkeyup="renderLists()" style="margin:0;padding:10px 15px;border-radius:20px"></div>
             <div class="panel-header" style="padding-top:5px;padding-bottom:5px;border-bottom:none"><span data-i18n="tab_groups">Groups</span> 
                 <div style="display:flex;gap:5px">
                 <div class="btn-icon" onclick="discover('group')" title="Discover Groups">🌍</div>
@@ -955,7 +970,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
             </div>
         </div>
         <div id="tab-channels" class="tab-content" style="display:none">
-            <div style="padding:20px 15px 5px 15px"><input type="text" id="channel-search" class="form-input" placeholder="Search channels..." onkeyup="renderLists()" style="margin:0;padding:10px 15px;border-radius:20px"></div>
+            <div style="padding:10px 15px 5px 15px"><input type="text" id="channel-search" class="form-input" placeholder="Search channels..." onkeyup="renderLists()" style="margin:0;padding:10px 15px;border-radius:20px"></div>
             <div class="panel-header" style="padding-top:5px;padding-bottom:5px;border-bottom:none"><span data-i18n="tab_channels">Channels</span> <div style="display:flex;gap:5px"><div class="btn-icon" onclick="discover('channel')" title="Discover Channels">🌍</div><div class="btn-icon" onclick="createChannel()" title="Create Channel">+</div></div></div>
             <div style="padding:0 15px 10px 15px"><button class="form-input" style="cursor:pointer;border-radius:20px;text-align:center;background:var(--bg);border:1px solid var(--border)" onclick="joinGroup()">Join via Code</button></div>
             <div class="list-area" id="list-channels">
@@ -1289,6 +1304,8 @@ async function init(){
         if(localStorage.getItem('mw_theme')=='light') document.body.classList.add('light-mode');
         setLang(curLang);
         pollLoop();
+        window.addEventListener('online', () => setConn(false));
+        window.addEventListener('offline', () => setConn(false));
     } catch(e) { console.error("Init failed", e); alert("App failed to initialize: " + e.message); }
 }
 
@@ -1334,6 +1351,12 @@ async function pollLoop() {
     setTimeout(pollLoop, 2000);
 }
 
+function setConn(s){
+    let el = document.getElementById('conn-indicator');
+    if(s) el.classList.add('status-connected');
+    else el.classList.remove('status-connected');
+}
+
 async function poll(){
     try {
         let lastPub = 0;
@@ -1341,6 +1364,7 @@ async function poll(){
         if(pubH.length) lastPub = pubH[pubH.length-1].id || 0;
         let r=await req('poll', {last_pub: lastPub});
         let d=await r.json();
+        setConn(true);
         S.online=d.online;
         if(d.profile){
             document.getElementById('my-av').style.backgroundImage=`url('${d.profile.avatar}')`;
@@ -1349,8 +1373,6 @@ async function poll(){
             document.getElementById('my-date').innerText="Joined: "+new Date(d.profile.joined_at*1000).toLocaleDateString();
         }
         for(let m of d.dms){
-            if(m.type=='signal_req'){ handleSignalReq(m); continue; }
-            if(m.type=='signal_ack'){ handleSignalAck(m); continue; }
             if(m.type=='delete'){ await removeMsg('dm',m.from_user,m.extra_data); continue; }
             if(m.type=='read'){ 
                 let h=await get('dm',m.from_user); 
@@ -1360,7 +1382,12 @@ async function poll(){
             }
             if(m.type=='wencrypt_ready'){ handleWeReady(m); continue; }
             if(m.type=='wencrypt_key'){ handleWeKey(m); continue; }
-            if(m.type=='enc'){ try{m.message=await dec(m.from_user,m.message,m.extra_data)}catch(e){m.message="[Encrypted]"} }
+            if(m.type=='enc'){ 
+                try{
+                    if(!S.e2ee[m.from_user]) await ensureE2EE(m.from_user);
+                    m.message=await dec(m.from_user,m.message,m.extra_data);
+                }catch(e){m.message="[Encrypted]"} 
+            }
             await store('dm',m.from_user,m);
             let prev = m.type==='text' ? m.message : '['+m.type+']';
             notify(m.from_user, prev, 'dm');
@@ -1386,7 +1413,7 @@ async function poll(){
              document.getElementById('chat-sub').innerText=sub;
              if(ou && ou.avatar) document.getElementById('chat-av').style.backgroundImage=`url('${ou.avatar}')`;
         }
-} catch(e){ console.error("Poll error:", e); }
+} catch(e){ console.error("Poll error:", e); setConn(false); }
 }
 
 function notify(id, text, type) {
@@ -1472,29 +1499,32 @@ function toggleEncryption(){
     if(S.type=='dm') startE2EE();
     else if(S.type=='group') startWEncrypt();
 }
-async function startE2EE(){ // DM Logic
+async function startE2EE(){
     if(!window.crypto || !window.crypto.subtle) { alertModal('Error', 'Encryption requires HTTPS'); return; }
     if(S.type!='dm'||S.e2ee[S.id])return;
-    let exp=await window.crypto.subtle.exportKey("jwk",S.keys.pub);
-    req('send', {to_user:S.id,message:JSON.stringify(exp),type:'signal_req'});
-    alertModal("Security", "Encryption request sent. Waiting for approval...");
+    startProg();
+    if(await ensureE2EE(S.id)){
+        alertModal("Security", "Encryption enabled.");
+        showProfilePopup();
+        document.getElementById('txt').placeholder="Type an encrypted message...";
+    } else {
+        alertModal("Info", "Encryption unavailable. Using standard connection.");
+    }
+    endProg();
 }
-async function handleSignalReq(m){
-    confirmModal("Encryption Request", m.from_user + " wants to start a secure chat.", async (yes)=>{
-        if(yes){
-            let fk=await window.crypto.subtle.importKey("jwk",JSON.parse(m.message),{name:"ECDH",namedCurve:"P-256"},true,[]);
-            await saveSession(m.from_user, await window.crypto.subtle.deriveKey({name:"ECDH",public:fk},S.keys.priv,{name:"AES-GCM",length:256},false,["encrypt","decrypt"]));
-            let exp=await window.crypto.subtle.exportKey("jwk",S.keys.pub);
-            req('send', {to_user:m.from_user, message:JSON.stringify(exp), type:'signal_ack'});
-            alertModal("Security", "Secure channel established.");
+async function ensureE2EE(u){
+    if(S.e2ee[u]) return true;
+    try {
+        let r = await fetch('?action=get_profile&u=' + u);
+        let d = await r.json();
+        if(d.public_key) {
+            let fk = await window.crypto.subtle.importKey("jwk", JSON.parse(d.public_key), {name:"ECDH",namedCurve:"P-256"}, true, []);
+            let derived = await window.crypto.subtle.deriveKey({name:"ECDH",public:fk}, S.keys.priv, {name:"AES-GCM",length:256}, false, ["encrypt","decrypt"]);
+            await saveSession(u, derived);
+            return true;
         }
-    });
-}
-async function handleSignalAck(m){
-    let fk=await window.crypto.subtle.importKey("jwk",JSON.parse(m.message),{name:"ECDH",namedCurve:"P-256"},true,[]);
-    await saveSession(m.from_user, await window.crypto.subtle.deriveKey({name:"ECDH",public:fk},S.keys.priv,{name:"AES-GCM",length:256},false,["encrypt","decrypt"]));
-    alertModal("Security", "Secure channel ready with "+m.from_user);
-    if(S.id==m.from_user) { document.getElementById('txt').placeholder="Type an encrypted message..."; }
+    } catch(e) { console.error("E2EE Setup failed", e); }
+    return false;
 }
 async function enc(u,txt){
     let iv=window.crypto.getRandomValues(new Uint8Array(12));
@@ -1805,11 +1835,14 @@ async function send(){
     let load = { message: txt, type: 'text', reply_to: S.reply, timestamp: ts };
     if(S.type=='dm') load.to_user=S.id; else if(S.type=='group'||S.type=='channel') load.group_id=S.id; else if(S.type=='public') load.group_id=-1;
 
-    try {
-        if(S.type=='dm' && S.e2ee[S.id]){
+    if(S.type=='dm' && S.e2ee[S.id]){
+        try {
             let e=await enc(S.id,txt);
             load.message=e.c; load.extra=e.i; load.type='enc';
-        }
+        } catch(e){ console.error("Encryption failed, sending plain", e); }
+    }
+
+    try {
         let r = await req('send', load);
         let d = await r.json();
         if(d.status === 'success') {
@@ -2382,9 +2415,6 @@ mv.addEventListener('touchend', e => {
     let tEX=e.changedTouches[0].screenX, tEY=e.changedTouches[0].screenY;
     if(tEX - tSX > 80 && Math.abs(tEY - tSY) < 60 && tSX < 50) closeChat();
 }, {passive:true});
-
-window.addEventListener('online', () => showToast('Back online'));
-window.addEventListener('offline', () => showToast('You are offline'));
 
 if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
 init().catch(e=>console.error(e));

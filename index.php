@@ -1,5 +1,8 @@
 <?php
 header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com; frame-ancestors 'none';");
+ini_set('session.cookie_httponly', 1);
+ini_set('session.cookie_samesite', 'Strict');
+ini_set('session.use_strict_mode', 1);
 session_start();
 if (empty($_SESSION['csrf_token'])) {
     $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
@@ -246,6 +249,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt = $db->prepare("INSERT INTO messages (from_user, to_user, message, type, reply_to_id, extra_data, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)");
             $stmt->execute([$me, $input['to_user'], $msg, $type, $reply, $extra, $ts]);
         } else if (isset($input['group_id'])) {
+            if ($input['group_id'] != -1) {
+                $chk = $db->prepare("SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?");
+                $chk->execute([$input['group_id'], $myId]);
+                if (!$chk->fetch()) { echo json_encode(['status'=>'error','message'=>'Not a member']); exit; }
+            }
+
             // Channel Permission Check
             $gstmt = $db->prepare("SELECT owner_id, category FROM groups WHERE id = ?");
             $gstmt->execute([$input['group_id']]);
@@ -266,7 +275,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             echo json_encode(['status'=>'error', 'message'=>'Upload failed']); exit;
         }
         
-        $mime = $_FILES['file']['type'];
+        $finfo = new finfo(FILEINFO_MIME_TYPE);
+        $mime = $finfo->file($_FILES['file']['tmp_name']);
         $data = file_get_contents($_FILES['file']['tmp_name']);
         $b64 = 'data:' . $mime . ';base64,' . base64_encode($data);
         
@@ -280,6 +290,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt = $db->prepare("INSERT INTO messages (from_user, to_user, message, type, reply_to_id, extra_data, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)");
             $stmt->execute([$me, $_POST['to_user'], $msg, $type, $reply, $extra, $ts]);
         } else if (!empty($_POST['group_id'])) {
+            if ($_POST['group_id'] != -1) {
+                $chk = $db->prepare("SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?");
+                $chk->execute([$_POST['group_id'], $myId]);
+                if (!$chk->fetch()) { echo json_encode(['status'=>'error','message'=>'Not a member']); exit; }
+            }
+
             // Channel Permission Check
             $gstmt = $db->prepare("SELECT owner_id, category FROM groups WHERE id = ?");
             $gstmt->execute([$_POST['group_id']]);
@@ -1649,7 +1665,7 @@ function createMsgNode(m, showSender){
     if(showSender) sender=`<div class="msg-sender" onclick="if(ME!='${m.from_user}'){openChat('dm','${m.from_user}');switchTab('chats');}">${m.from_user}</div>`;
 
     let txt=esc(m.message);
-    if(m.type=='image') txt=`<img src="${m.message}" onclick="window.open(this.src)" onload="scrollToBottom(false)">`;
+    if(m.type=='image') txt=`<img src="${m.message.replace(/"/g, '&quot;')}" onclick="window.open(this.src)" onload="scrollToBottom(false)">`;
     else if(m.type=='audio') txt=`<div class="audio-player">
             <button class="play-btn" onclick="playAudio(this)">
                 <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>

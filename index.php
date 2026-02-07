@@ -96,6 +96,13 @@ try {
         $db->exec("PRAGMA user_version = 3");
     }
 
+    if ($ver < 4) {
+        $db->exec("CREATE INDEX IF NOT EXISTS idx_users_last_seen ON users(last_seen)");
+        $db->exec("CREATE INDEX IF NOT EXISTS idx_users_typing ON users(typing_to)");
+        $db->exec("CREATE INDEX IF NOT EXISTS idx_groups_discovery ON groups(type, category)");
+        $db->exec("PRAGMA user_version = 4");
+    }
+
 } catch (PDOException $e) { die("DB Error: " . $e->getMessage()); }
 
 // -------------------------------------------------------------------------
@@ -105,6 +112,7 @@ $action = $_GET['action'] ?? '';
 
 if ($action === 'manifest') {
     header('Content-Type: application/manifest+json');
+    header('Cache-Control: public, max-age=86400');
     echo json_encode([
         "name" => "moreweb Messenger",
         "short_name" => "Messenger",
@@ -121,11 +129,13 @@ if ($action === 'manifest') {
 }
 if ($action === 'icon') {
     header('Content-Type: image/svg+xml');
+    header('Cache-Control: public, max-age=86400');
     echo '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="100" fill="#1a0b2e"/><path d="M256 85c-93 0-168 69-168 154 0 49 25 92 64 121v62l60-33c14 4 29 6 44 6 93 0 168-69 168-154S349 85 256 85z" fill="#a855f7"/></svg>';
     exit;
 }
 if ($action === 'sw') {
     header('Content-Type: application/javascript');
+    header('Cache-Control: public, max-age=3600');
     echo "const CACHE='mw-v1';self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['index.php','?action=icon'])));self.skipWaiting()});self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('fetch',e=>{if(e.request.method!='GET')return;e.respondWith(fetch(e.request).catch(()=>caches.match(e.request).then(r=>r||new Response('',{status:404}))))});self.addEventListener('notificationclick',e=>{e.notification.close();e.waitUntil(clients.matchAll({type:'window',includeUncontrolled:true}).then(cl=>{for(let c of cl){if(c.url&&'focus'in c)return c.focus();}if(clients.openWindow)return clients.openWindow('index.php');}));});";
     exit;
 }
@@ -389,9 +399,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!isset($_SESSION['user'])) { http_response_code(403); exit; }
         $me = $_SESSION['user'];
         $myId = $_SESSION['uid'];
-        session_write_close();
 
-        $db->prepare("UPDATE users SET last_seen = ? WHERE id = ?")->execute([time(), $myId]);
+        if (!isset($_SESSION['last_seen_upd']) || time() - $_SESSION['last_seen_upd'] > 60) {
+            $db->prepare("UPDATE users SET last_seen = ? WHERE id = ?")->execute([time(), $myId]);
+            $_SESSION['last_seen_upd'] = time();
+        }
+
+        session_write_close();
         // Cleanup old messages (1% chance)
         if (rand(1, 100) === 1) {
             $t24h = time() - 86400;

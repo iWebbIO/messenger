@@ -469,37 +469,50 @@ if (!isset($_SESSION['user'])) {
 <link rel="icon" href="?action=icon" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@100;300;400;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@100;300;400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@100;300;400;700&family=Roboto:wght@100;300;400;500&display=swap" rel="stylesheet">
 <style>
-    :root { --dark-bg: #000000; --neon-accent: #bf00ff; --text-heading: #ffffff; --accent: #a855f7; }
-    body{background:#0f0518;color:#eee;font-family:'Calibri', 'Poppins', sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;overflow:hidden}
+    body { background: #0f0518; color: #eee; font-family: 'Roboto', sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; overflow: hidden; }
     
-    .box{background:#1a0b2e;padding:2rem;border-radius:12px;width:300px;text-align:center;box-shadow:0 10px 30px rgba(0,0,0,0.5);border:1px solid #2f1b42;position:relative;z-index:10}
-    input{width:100%;padding:12px;margin:10px 0;background:#261038;border:1px solid #2f1b42;color:#fff;border-radius:6px;box-sizing:border-box;font-family:inherit}
-    button{width:100%;padding:12px;background:#a855f7;color:#fff;border:none;border-radius:6px;font-weight:bold;cursor:pointer;font-family:inherit}
+    .box { background: #1a0b2e; padding: 48px 40px 36px; border-radius: 12px; width: 400px; max-width: 90%; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 1px solid #2f1b42; position: relative; z-index: 10; display: flex; flex-direction: column; align-items: center; }
     
-@keyframes gradientBG { 0% {background-position: 0% 50%;} 50% {background-position: 100% 50%;} 100% {background-position: 0% 50%;} }
-#login-bg {
-    position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 0;
-    background: linear-gradient(-45deg, #0f0518, #3b0764, #6b21a8, #0f0518);
-    background-size: 400% 400%;
-    animation: gradientBG 3s ease infinite;
-    opacity: 0; transition: opacity 1.5s ease-in-out;
-}
-body.login-process #login-bg { opacity: 1; }
+    .welcome-text { font-weight: 100; font-size: 3.5rem; margin-bottom: 10px; color: #fff; letter-spacing: -0.5px; text-shadow: 0 0 20px rgba(168, 85, 247, 0.5); }
+    
+    h2 { font-weight: 400; font-size: 1.1rem; margin: 0 0 40px 0; color: #aaa; }
+    
+    input { width: 100%; padding: 13px 15px; margin: 0 0 15px 0; background: #261038; border: 1px solid #2f1b42; color: #fff; border-radius: 6px; box-sizing: border-box; font-family: inherit; font-size: 1rem; transition: 0.2s; }
+    input:focus { border-color: #a855f7; outline: none; box-shadow: 0 0 10px rgba(168, 85, 247, 0.3); }
+    
+    button { width: 100%; padding: 12px 0; background: #a855f7; color: #fff; border: none; border-radius: 6px; font-weight: bold; font-size: 0.9rem; cursor: pointer; font-family: inherit; margin-top: 20px; transition: background 0.2s; box-shadow: 0 4px 15px rgba(168, 85, 247, 0.4); }
+    button:hover { background: #9333ea; }
+    
+    #toggle-text { color: #a855f7; cursor: pointer; font-size: 0.875rem; margin-top: 25px; font-weight: 500; }
+
+    @keyframes gradientBG { 0% {background-position: 0% 50%;} 50% {background-position: 100% 50%;} 100% {background-position: 0% 50%;} }
+    #login-bg {
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 0;
+        background: linear-gradient(-45deg, #0f0518, #3b0764, #6b21a8, #0f0518);
+        background-size: 400% 400%;
+        animation: gradientBG 3s ease infinite;
+        opacity: 0; transition: opacity 1.5s ease-in-out;
+    }
+    body.login-process #login-bg { opacity: 1; }
 
     /* Splash Screen */
     .splash-screen {
         position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background-color: #202124; z-index: 9999;
         background-color: #000000; z-index: 9999;
         display: flex; justify-content: center; align-items: center;
         animation: screenFadeOut 0.5s ease-in-out 1.5s forwards;
         pointer-events: none;
     }
     .splash-screen .word {
+        color: #FFFFFF; font-family: 'Roboto', sans-serif; font-weight: 100; font-size: clamp(4rem, 10vw, 6rem);
         color: #FFFFFF; font-family: 'Poppins', sans-serif; font-weight: 100; font-size: clamp(8rem, 15vw, 10rem);
         display: grid; grid-template-columns: auto auto; justify-items: center;
-        line-height: 0.8; gap: 0.15em; text-shadow: 0 0 30px var(--neon-accent); direction: ltr;
+        line-height: 0.8; gap: 0.15em; direction: ltr;
+        line-height: 0.8; gap: 0.15em; text-shadow: 0 0 30px #bf00ff; direction: ltr;
         animation: fadeWordOut 0.3s cubic-bezier(0.55, 0.085, 0.68, 0.53) 1.0s forwards;
     }
     .splash-screen .word span { opacity: 0; position: relative; }
@@ -513,10 +526,10 @@ body.login-process #login-bg { opacity: 1; }
     .splash-screen .word span:nth-child(3) { animation: letterAppear 0.3s ease-out 0.25s forwards; }
     .splash-screen .word span:nth-child(4) { animation: letterAppear 0.3s ease-out 0.30s forwards; }
 
-    .lang-toggle { position: absolute; top: 20px; right: 20px; background: rgba(255,255,255,0.1); border-radius: 30px; display: flex; overflow: hidden; cursor: pointer; border: 1px solid rgba(255,255,255,0.2); z-index: 20; }
-    .lang-opt { padding: 10px 20px; font-weight: bold; color: #888; transition: 0.3s; font-size: 1.2rem; }
-    .lang-opt.active { background: var(--accent); color: #fff; }
-    .rtl { direction: rtl; font-family: 'Calibri', 'Tahoma', sans-serif; }
+    .lang-toggle { position: absolute; top: 20px; right: 20px; display: flex; gap: 15px; z-index: 20; }
+    .lang-opt { font-weight: 500; color: #9aa0a6; cursor: pointer; transition: 0.2s; font-size: 0.9rem; }
+    .lang-opt.active { color: #e8eaed; font-weight: 700; }
+    .rtl { direction: rtl; }
 </style>
 </head>
 <body>
@@ -532,10 +545,11 @@ body.login-process #login-bg { opacity: 1; }
 
 <div id="login-bg"></div>
 <div class="box">
+    <div class="welcome-text">Welcome</div>
     <h2 id="ttl">moreweb Messenger</h2><div id="err" style="color:#f55;display:none;margin-bottom:10px"></div>
     <input id="u" placeholder="Username"><input type="password" id="p" placeholder="Password">
     <button onclick="sub()">Sign In</button>
-    <p id="toggle-text" style="color:#888;cursor:pointer;font-size:0.9rem" onclick="toggleMode()">Need an account? Create one</p>
+    <div id="toggle-text" onclick="toggleMode()">Need an account? Create one</div>
 </div>
 <script>
 const CSRF_TOKEN = "<?php echo $_SESSION['csrf_token']; ?>";
@@ -814,9 +828,23 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
         .mobile-only { display: block !important; }
     }
     @media (min-width: 769px) { .back-btn { display:none; } .mobile-only { display: none !important; } }
+
+    /* Splash Screen Main App */
+    .splash-screen { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: #000000; z-index: 9999; display: flex; justify-content: center; align-items: center; pointer-events: none; }
+    .splash-screen .word { color: #FFFFFF; font-family: 'Poppins', sans-serif; font-weight: 100; font-size: clamp(8rem, 15vw, 10rem); display: grid; grid-template-columns: auto auto; justify-items: center; line-height: 0.8; gap: 0.15em; text-shadow: 0 0 30px #bf00ff; direction: ltr; }
+    .splash-screen .word span { opacity: 0; position: relative; }
+    @keyframes letterAppear { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
+    .splash-screen .word span:nth-child(1) { animation: letterAppear 0.3s ease-out 0.05s forwards; }
+    .splash-screen .word span:nth-child(2) { animation: letterAppear 0.3s ease-out 0.15s forwards; }
+    .splash-screen .word span:nth-child(3) { animation: letterAppear 0.3s ease-out 0.25s forwards; }
+    .splash-screen .word span:nth-child(4) { animation: letterAppear 0.3s ease-out 0.30s forwards; }
 </style>
 </head>
 <body>
+
+<div id="app-splash" class="splash-screen">
+    <div class="word"><span>m</span><span>o</span><span>r</span><span>e</span></div>
+</div>
 
 <!-- LOADING SYSTEM -->
 <div id="progress-bar-container">
@@ -1610,6 +1638,7 @@ async function renderLists(){
         document.getElementById('list-groups').innerHTML=gh;
         document.getElementById('list-channels').innerHTML=ch;
         document.getElementById('online-count').innerText=S.online.length;
+        let sp=document.getElementById('app-splash'); if(sp){ sp.style.transition='opacity 0.2s'; sp.style.opacity=0; setTimeout(()=>sp.remove(),200); }
     } catch(e) { console.error("RenderLists error", e); }
 }
 

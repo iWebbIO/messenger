@@ -10,6 +10,10 @@ if (empty($_SESSION['csrf_token'])) {
 ini_set('upload_max_filesize', '20M');
 ini_set('post_max_size', '20M');
 
+// ADMIN CREDENTIALS
+$adminUser = '';
+$adminPass = ''; // Set these to enable Admin Panel
+
 // -------------------------------------------------------------------------
 // 1. CONFIGURATION & DATABASE
 // -------------------------------------------------------------------------
@@ -204,6 +208,26 @@ if ($action === 'get_observatory') {
     echo json_encode(['status' => 'success', 'data' => $data]);
     exit;
 }
+if (isset($_SESSION['admin']) && !empty($adminUser)) {
+    if ($action === 'admin_get_data') {
+        header('Content-Type: application/json');
+        $stats = [
+            'users' => $db->query("SELECT COUNT(*) FROM users")->fetchColumn(),
+            'groups' => $db->query("SELECT COUNT(*) FROM groups")->fetchColumn(),
+            'messages' => $db->query("SELECT COUNT(*) FROM messages")->fetchColumn(),
+            'db_size' => round(filesize($dbFile) / 1024 / 1024, 2) . ' MB'
+        ];
+        $users = $db->query("SELECT id, username, joined_at, last_seen FROM users ORDER BY id DESC")->fetchAll();
+        $groups = $db->query("SELECT id, name, type, owner_id, created_at FROM groups ORDER BY id DESC")->fetchAll();
+        echo json_encode(['status'=>'success', 'stats'=>$stats, 'users'=>$users, 'groups'=>$groups]);
+        exit;
+    }
+    if ($action === 'admin_logout') {
+        session_destroy();
+        header("Location: index.php");
+        exit;
+    }
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/json');
@@ -215,6 +239,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     $input = json_decode(file_get_contents('php://input'), true);
+    if (!is_array($input)) $input = [];
 
     // AUTH
     if ($action === 'register') {
@@ -238,6 +263,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
     if ($action === 'login') {
+        if (!empty($adminUser) && !empty($adminPass) && ($input['username'] ?? '') === $adminUser && ($input['password'] ?? '') === $adminPass) {
+            session_regenerate_id(true);
+            $_SESSION['admin'] = true;
+            echo json_encode(['status' => 'success']);
+            exit;
+        }
         $stmt = $db->prepare("SELECT id, username, password FROM users WHERE lower(username) = lower(?)");
         $stmt->execute([$input['username']]);
         $row = $stmt->fetch();
@@ -248,6 +279,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             echo json_encode(['status' => 'success']);
         } else { echo json_encode(['status' => 'error', 'message' => 'Invalid credentials']); }
         exit;
+    }
+
+    // ADMIN ACTIONS
+    if (isset($_SESSION['admin']) && !empty($adminUser)) {
+        if ($action === 'admin_delete_user') {
+            $uid = $input['id'];
+            $stmt = $db->prepare("SELECT username FROM users WHERE id = ?");
+            $stmt->execute([$uid]);
+            $u = $stmt->fetchColumn();
+            if ($u) {
+                $db->prepare("DELETE FROM users WHERE id = ?")->execute([$uid]);
+                $db->prepare("DELETE FROM group_members WHERE user_id = ?")->execute([$uid]);
+                $db->prepare("DELETE FROM messages WHERE from_user = ? OR to_user = ?")->execute([$u, $u]);
+                // Cleanup orphaned messages from groups owned by this user before deleting groups
+                $db->prepare("DELETE FROM messages WHERE group_id IN (SELECT id FROM groups WHERE owner_id = ?)")->execute([$uid]);
+                // Delete groups owned by user
+                $db->prepare("DELETE FROM groups WHERE owner_id = ?")->execute([$uid]);
+            }
+            echo json_encode(['status'=>'success']);
+            exit;
+        }
+        if ($action === 'admin_delete_group') {
+            $gid = $input['id'];
+            $db->prepare("DELETE FROM groups WHERE id = ?")->execute([$gid]);
+            $db->prepare("DELETE FROM group_members WHERE group_id = ?")->execute([$gid]);
+            $db->prepare("DELETE FROM messages WHERE group_id = ?")->execute([$gid]);
+            echo json_encode(['status'=>'success']);
+            exit;
+        }
     }
 
     if (!isset($_SESSION['user'])) { http_response_code(403); exit; }
@@ -498,8 +558,112 @@ if ($action === 'logout') { session_destroy(); header("Location: index.php"); ex
 // -------------------------------------------------------------------------
 // FRONTEND
 // -------------------------------------------------------------------------
-if (!isset($_SESSION['user'])) {
+if (isset($_SESSION['admin']) && !empty($adminUser)) {
 ?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Admin Panel - moreweb Messenger</title>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+<style>
+    body { background: #0f0518; color: #eee; font-family: 'Roboto', sans-serif; margin: 0; padding: 20px; }
+    .container { max-width: 1000px; margin: 0 auto; }
+    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; padding-bottom: 20px; border-bottom: 1px solid #2f1b42; }
+    .header h1 { margin: 0; color: #a855f7; font-weight: 300; }
+    .btn { padding: 8px 16px; background: #a855f7; color: #fff; border: none; border-radius: 4px; cursor: pointer; text-decoration: none; font-size: 0.9rem; }
+    .btn:hover { background: #9333ea; }
+    .btn-danger { background: #ef4444; }
+    .btn-danger:hover { background: #dc2626; }
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 40px; }
+    .stat-card { background: #1a0b2e; padding: 20px; border-radius: 8px; border: 1px solid #2f1b42; text-align: center; }
+    .stat-val { font-size: 2rem; font-weight: bold; color: #fff; margin: 10px 0; }
+    .stat-label { color: #888; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 1px; }
+    .section { background: #1a0b2e; padding: 20px; border-radius: 8px; border: 1px solid #2f1b42; margin-bottom: 30px; }
+    .section h2 { margin-top: 0; color: #ccc; font-size: 1.2rem; margin-bottom: 20px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 12px; border-bottom: 1px solid #2f1b42; font-size: 0.9rem; }
+    th { color: #888; font-weight: 500; }
+    tr:last-child td { border-bottom: none; }
+    .action-btn { padding: 4px 8px; font-size: 0.8rem; }
+</style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1>Admin Panel</h1>
+        <a href="?action=admin_logout" class="btn">Logout</a>
+    </div>
+    <div class="stats-grid" id="stats"></div>
+    
+    <div class="section">
+        <h2>Users</h2>
+        <div style="overflow-x:auto">
+            <table id="users-table">
+                <thead><tr><th>ID</th><th>Username</th><th>Joined</th><th>Last Seen</th><th>Action</th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Groups</h2>
+        <div style="overflow-x:auto">
+            <table id="groups-table">
+                <thead><tr><th>ID</th><th>Name</th><th>Type</th><th>Owner ID</th><th>Created</th><th>Action</th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+<script>
+const CSRF_TOKEN = "<?php echo $_SESSION['csrf_token']; ?>";
+async function loadData() {
+    let r = await fetch('?action=admin_get_data');
+    let d = await r.json();
+    if(d.status === 'success') {
+        // Stats
+        let sh = '';
+        for(let [k,v] of Object.entries(d.stats)) {
+            sh += `<div class="stat-card"><div class="stat-label">${k.replace('_',' ')}</div><div class="stat-val">${v}</div></div>`;
+        }
+        document.getElementById('stats').innerHTML = sh;
+
+        // Users
+        let uh = '';
+        d.users.forEach(u => {
+            uh += `<tr><td>${u.id}</td><td>${u.username}</td><td>${new Date(u.joined_at*1000).toLocaleDateString()}</td><td>${new Date(u.last_seen*1000).toLocaleString()}</td><td><button class="btn btn-danger action-btn" onclick="delUser(${u.id}, '${u.username}')">Delete</button></td></tr>`;
+        });
+        document.querySelector('#users-table tbody').innerHTML = uh || '<tr><td colspan="5">No users found</td></tr>';
+
+        // Groups
+        let gh = '';
+        d.groups.forEach(g => {
+            gh += `<tr><td>${g.id}</td><td>${g.name}</td><td>${g.type}</td><td>${g.owner_id}</td><td>${new Date(g.created_at*1000).toLocaleDateString()}</td><td><button class="btn btn-danger action-btn" onclick="delGroup(${g.id})">Delete</button></td></tr>`;
+        });
+        document.querySelector('#groups-table tbody').innerHTML = gh || '<tr><td colspan="6">No groups found</td></tr>';
+    }
+}
+async function delUser(id, name) {
+    if(confirm(`Delete user ${name}? This cannot be undone.`)) {
+        await fetch('?action=admin_delete_user', {method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF_TOKEN}, body:JSON.stringify({id})});
+        loadData();
+    }
+}
+async function delGroup(id) {
+    if(confirm(`Delete group ${id}?`)) {
+        await fetch('?action=admin_delete_group', {method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF_TOKEN}, body:JSON.stringify({id})});
+        loadData();
+    }
+}
+loadData();
+</script>
+</body>
+</html>
+<?php exit; } ?>
+
+<?php if (!isset($_SESSION['user'])) { ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -529,6 +693,7 @@ if (!isset($_SESSION['user'])) {
     button:hover { background: #9333ea; }
     
     #toggle-text { color: #a855f7; cursor: pointer; font-size: 0.875rem; margin-top: 25px; font-weight: 500; }
+    #admin-link { color: #666; cursor: pointer; font-size: 0.75rem; margin-top: 15px; display: block; }
 
     @keyframes gradientBG { 0% {background-position: 0% 50%;} 50% {background-position: 100% 50%;} 100% {background-position: 0% 50%;} }
     #login-bg {
@@ -979,9 +1144,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
             <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
         </div>
         <div class="rail-btn" id="nav-observatory" onclick="switchTab('observatory')">
-            
-<?xml version="1.0" encoding="utf-8"?><!-- Uploaded to: SVG Repo, www.svgrepo.com, Generator: SVG Repo Mixer Tools -->
-<svg fill="#000000" width="800px" height="800px" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M19.9,1.622a1,1,0,0,0-1.365-.52L1.562,9.388a1,1,0,0,0-.488,1.276L2.59,14.378A1,1,0,0,0,3.516,15a1.043,1.043,0,0,0,.24-.029L11,13.179v4.407L7.293,21.293a1,1,0,1,0,1.414,1.414L11,20.414V22a1,1,0,0,0,2,0V20.414l2.293,2.293a1,1,0,0,0,1.414-1.414L13,17.586v-4.9L22.24,10.4a1,1,0,0,0,.686-1.348ZM4.115,12.821l-.836-2.047L18.447,3.368l2.191,5.367Z"/></svg>
+            <svg viewBox="0 0 24 24"><path d="M19.9,1.622a1,1,0,0,0-1.365-.52L1.562,9.388a1,1,0,0,0-.488,1.276L2.59,14.378A1,1,0,0,0,3.516,15a1.043,1.043,0,0,0,.24-.029L11,13.179v4.407L7.293,21.293a1,1,0,1,0,1.414,1.414L11,20.414V22a1,1,0,0,0,2,0V20.414l2.293,2.293a1,1,0,0,0,1.414-1.414L13,17.586v-4.9L22.24,10.4a1,1,0,0,0,.686-1.348ZM4.115,12.821l-.836-2.047L18.447,3.368l2.191,5.367Z"/></svg>
         </div>
         
         <div style="flex:1" class="rail-spacer"></div>

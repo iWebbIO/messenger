@@ -1247,6 +1247,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
         </div>
         <div id="tab-observatory" class="tab-content" style="display:none">
             <div class="panel-header" data-i18n="tab_observatory">Observatory</div>
+            <div id="obs-clocks" style="padding:15px;border-bottom:1px solid var(--border);"></div>
             <div id="obs-market-list" class="market-list"></div>
             <div style="padding:20px;text-align:center;color:#666;font-size:0.9rem" class="mobile-only">Select an item or view the feed on the right.</div>
             <div style="padding:15px" class="mobile-only"><button class="btn-primary" style="width:100%" onclick="showObsFeed()">View News Feed</button></div>
@@ -1906,6 +1907,7 @@ function switchTab(t){
         document.getElementById('chat-view').style.display='none';
         document.getElementById('observatory-view').style.display='flex';
         loadObservatory();
+        updateWorldClocks();
     } else {
         document.getElementById('observatory-view').style.display='none';
         document.getElementById('chat-view').style.display='flex';
@@ -2782,6 +2784,35 @@ mv.addEventListener('touchend', e => {
     let tEX=e.changedTouches[0].screenX, tEY=e.changedTouches[0].screenY;
     if(tEX - tSX > 80 && Math.abs(tEY - tSY) < 60 && tSX < 50) closeChat();
 }, {passive:true});
+
+function updateWorldClocks() {
+    if(S.tab !== 'observatory') return;
+    const el = document.getElementById('obs-clocks');
+    if(!el) return;
+    const zones = [
+        { label: 'Washington DC', tz: 'America/New_York', flag: '🇺🇸' },
+        { label: 'Tel Aviv', tz: 'Asia/Jerusalem', flag: '🇮🇱' },
+        { label: 'Tehran', tz: 'Asia/Tehran', flag: '🇮🇷' }
+    ];
+    let h = '';
+    const now = new Date();
+    zones.forEach(z => {
+        try {
+            const parts = new Intl.DateTimeFormat('en-US', { timeZone: z.tz, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).formatToParts(now);
+            const timeHtml = parts.map(p => p.type === 'second' ? `<span style="font-size:0.8em;opacity:0.7">${p.value}</span>` : p.value).join('');
+            const date = new Intl.DateTimeFormat('en-US', { timeZone: z.tz, month: 'short', day: 'numeric' }).format(now);
+            h += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <div style="display:flex;align-items:center;gap:8px;color:var(--text);font-size:0.9rem"><span>${z.flag}</span> ${z.label}</div>
+                <div style="text-align:right">
+                    <div style="font-size:1rem;font-weight:bold;color:var(--accent);font-family:monospace">${timeHtml}</div>
+                    <div style="font-size:0.7rem;color:#888">${date}</div>
+                </div>
+            </div>`;
+        } catch(e) {}
+    });
+    el.innerHTML = h;
+}
+setInterval(updateWorldClocks, 1000);
 
 if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
 init().catch(e=>console.error(e));

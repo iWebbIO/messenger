@@ -588,8 +588,7 @@ if ($action === 'logout') { session_destroy(); header("Location: index.php"); ex
 // -------------------------------------------------------------------------
 // FRONTEND
 // -------------------------------------------------------------------------
-if (isset($_SESSION['admin']) && !empty($adminUser)) {
-?>
+?><?php if (isset($_SESSION['admin']) && !empty($adminUser)) { ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>

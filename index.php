@@ -1907,7 +1907,7 @@ async function loadObservatory() {
     // News
     let nh = '';
     n.forEach((item, i) => {
-        let title = curLang == 'fa' ? item.title_fa : item.title_en;
+        let title = item.title_fa || item.title_en;
         let summary = Array.isArray(item.summary) ? '<ul class="news-summary-list">' + item.summary.map(s => `<li>${s}</li>`).join('') + '</ul>' : item.summary;
         let date = new Date(item.timestamp * 1000);
         let timeStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});

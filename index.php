@@ -107,6 +107,12 @@ try {
         $db->exec("PRAGMA user_version = 4");
     }
 
+    if ($ver < 5) {
+        $cols = $db->query("PRAGMA table_info(users)")->fetchAll(PDO::FETCH_COLUMN, 1);
+        if (!in_array('observatory_access', $cols)) $db->exec("ALTER TABLE users ADD COLUMN observatory_access INTEGER DEFAULT 0");
+        $db->exec("PRAGMA user_version = 5");
+    }
+
 } catch (PDOException $e) { die("DB Error: " . $e->getMessage()); }
 
 // -------------------------------------------------------------------------
@@ -182,6 +188,16 @@ if ($action === 'get_group_details') {
 }
 if ($action === 'get_observatory') {
     header('Content-Type: application/json');
+    if (!isset($_SESSION['uid'])) { echo json_encode(['status'=>'error']); exit; }
+    
+    $stmt = $db->prepare("SELECT observatory_access FROM users WHERE id = ?");
+    $stmt->execute([$_SESSION['uid']]);
+    $acc = $stmt->fetchColumn();
+    if ($acc != 2) {
+        echo json_encode(['status' => 'access_denied', 'state' => (int)$acc]);
+        exit;
+    }
+
     $cacheFile = __DIR__ . '/mw_news_cache.enc';
     $key = 'mw_obs_key_static_99'; // Static key for cache encryption
     $iv = '1234567890123456'; // Fixed IV for cache consistency
@@ -217,7 +233,7 @@ if (isset($_SESSION['admin']) && !empty($adminUser)) {
             'messages' => $db->query("SELECT COUNT(*) FROM messages")->fetchColumn(),
             'db_size' => round(filesize($dbFile) / 1024 / 1024, 2) . ' MB'
         ];
-        $users = $db->query("SELECT id, username, joined_at, last_seen FROM users ORDER BY id DESC")->fetchAll();
+        $users = $db->query("SELECT id, username, joined_at, last_seen, observatory_access FROM users ORDER BY id DESC")->fetchAll();
         $groups = $db->query("SELECT id, name, type, owner_id, created_at FROM groups ORDER BY id DESC")->fetchAll();
         echo json_encode(['status'=>'success', 'stats'=>$stats, 'users'=>$users, 'groups'=>$groups]);
         exit;
@@ -280,6 +296,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else { echo json_encode(['status' => 'error', 'message' => 'Invalid credentials']); }
         exit;
     }
+    
+    if ($action === 'request_observatory') {
+        if (!isset($_SESSION['uid'])) exit;
+        $db->prepare("UPDATE users SET observatory_access = 1 WHERE id = ?")->execute([$_SESSION['uid']]);
+        echo json_encode(['status'=>'success']);
+        exit;
+    }
 
     // ADMIN ACTIONS
     if (isset($_SESSION['admin']) && !empty($adminUser)) {
@@ -305,6 +328,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $db->prepare("DELETE FROM groups WHERE id = ?")->execute([$gid]);
             $db->prepare("DELETE FROM group_members WHERE group_id = ?")->execute([$gid]);
             $db->prepare("DELETE FROM messages WHERE group_id = ?")->execute([$gid]);
+            echo json_encode(['status'=>'success']);
+            exit;
+        }
+        if ($action === 'admin_approve_observatory') {
+            $uid = $input['id'];
+            $val = $input['allow'] ? 2 : 0;
+            $db->prepare("UPDATE users SET observatory_access = ? WHERE id = ?")->execute([$val, $uid]);
             echo json_encode(['status'=>'success']);
             exit;
         }
@@ -601,7 +631,7 @@ if (isset($_SESSION['admin']) && !empty($adminUser)) {
         <h2>Users</h2>
         <div style="overflow-x:auto">
             <table id="users-table">
-                <thead><tr><th>ID</th><th>Username</th><th>Joined</th><th>Last Seen</th><th>Action</th></tr></thead>
+                <thead><tr><th>ID</th><th>Username</th><th>Joined</th><th>Last Seen</th><th>Observatory</th><th>Action</th></tr></thead>
                 <tbody></tbody>
             </table>
         </div>
@@ -633,9 +663,14 @@ async function loadData() {
         // Users
         let uh = '';
         d.users.forEach(u => {
-            uh += `<tr><td>${u.id}</td><td>${u.username}</td><td>${new Date(u.joined_at*1000).toLocaleDateString()}</td><td>${new Date(u.last_seen*1000).toLocaleString()}</td><td><button class="btn btn-danger action-btn" onclick="delUser(${u.id}, '${u.username}')">Delete</button></td></tr>`;
+            let obsBtn = '';
+            if(u.observatory_access == 1) obsBtn = `<button class="btn action-btn" style="background:#4caf50;margin-right:5px" onclick="apprObs(${u.id}, 1)">Approve</button><button class="btn btn-danger action-btn" onclick="apprObs(${u.id}, 0)">Deny</button>`;
+            else if(u.observatory_access == 2) obsBtn = `<span style="color:#4caf50;margin-right:5px">Active</span><button class="btn btn-danger action-btn" style="padding:2px 6px;font-size:0.7rem" onclick="apprObs(${u.id}, 0)">Revoke</button>`;
+            else obsBtn = `<span style="color:#666">None</span>`;
+            
+            uh += `<tr><td>${u.id}</td><td>${u.username}</td><td>${new Date(u.joined_at*1000).toLocaleDateString()}</td><td>${new Date(u.last_seen*1000).toLocaleString()}</td><td>${obsBtn}</td><td><button class="btn btn-danger action-btn" onclick="delUser(${u.id}, '${u.username}')">Delete</button></td></tr>`;
         });
-        document.querySelector('#users-table tbody').innerHTML = uh || '<tr><td colspan="5">No users found</td></tr>';
+        document.querySelector('#users-table tbody').innerHTML = uh || '<tr><td colspan="6">No users found</td></tr>';
 
         // Groups
         let gh = '';
@@ -656,6 +691,10 @@ async function delGroup(id) {
         await fetch('?action=admin_delete_group', {method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF_TOKEN}, body:JSON.stringify({id})});
         loadData();
     }
+}
+async function apprObs(id, allow) {
+    await fetch('?action=admin_approve_observatory', {method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF_TOKEN}, body:JSON.stringify({id, allow})});
+    loadData();
 }
 loadData();
 </script>
@@ -1890,6 +1929,24 @@ function closeObs() {
 async function loadObservatory() {
     let r = await fetch('?action=get_observatory');
     let d = await r.json();
+    
+    if(d.status === 'access_denied') {
+        document.getElementById('obs-market-list').innerHTML = '';
+        document.getElementById('obs-last-upd').innerText = '';
+        let h = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;text-align:center;padding:20px;color:#ccc">';
+        if(d.state == 1) {
+            h += '<div style="font-size:3rem;margin-bottom:20px">⏳</div>';
+            h += '<h3>Access Pending</h3><p style="color:#888">Your request to access the Observatory is pending approval.</p>';
+        } else {
+            h += '<div style="font-size:3rem;margin-bottom:20px">🔭</div>';
+            h += '<h3>Restricted Access</h3><p style="color:#888;margin-bottom:20px">The Observatory requires special authorization.</p>';
+            h += '<button class="btn-primary" onclick="reqObservatory()">Request Access</button>';
+        }
+        h += '</div>';
+        document.getElementById('obs-news-grid').innerHTML = h;
+        return;
+    }
+
     if(d.status !== 'success' || !d.data) return;
     
     const t = TR[curLang];
@@ -1930,6 +1987,13 @@ async function loadObservatory() {
         </div>`;
     });
     document.getElementById('obs-news-grid').innerHTML = nh;
+}
+
+async function reqObservatory() {
+    if(confirm("Request access to the Observatory?")) {
+        await fetch('?action=request_observatory', {method:'POST', headers:{'X-CSRF-Token': CSRF_TOKEN}});
+        loadObservatory();
+    }
 }
 
 async function renderLists(){

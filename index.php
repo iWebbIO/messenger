@@ -176,6 +176,34 @@ if ($action === 'get_group_details') {
     echo json_encode(['status'=>'success', 'group'=>$group, 'members'=>$stmt->fetchAll(), 'is_owner'=>($group['owner_id'] == $_SESSION['uid'])]);
     exit;
 }
+if ($action === 'get_observatory') {
+    header('Content-Type: application/json');
+    $cacheFile = __DIR__ . '/mw_news_cache.enc';
+    $key = 'mw_obs_key_static_99'; // Static key for cache encryption
+    $iv = '1234567890123456'; // Fixed IV for cache consistency
+    
+    $data = null;
+    // Check cache (10 minutes = 600 seconds)
+    if (file_exists($cacheFile) && (time() - filemtime($cacheFile) < 600)) {
+        $enc = file_get_contents($cacheFile);
+        $dec = openssl_decrypt($enc, 'AES-128-CTR', $key, 0, $iv);
+        $data = json_decode($dec, true);
+    }
+    
+    if (!$data) {
+        $ctx = stream_context_create(['http'=>['timeout'=>5]]);
+        $market = @file_get_contents('https://raw.githubusercontent.com/itsyebekhe/rasadai/refs/heads/main/market.json', false, $ctx);
+        $news = @file_get_contents('https://raw.githubusercontent.com/itsyebekhe/rasadai/refs/heads/main/news.json', false, $ctx);
+        
+        if ($market && $news) {
+            $data = ['market' => json_decode($market, true), 'news' => json_decode($news, true)];
+            $enc = openssl_encrypt(json_encode($data), 'AES-128-CTR', $key, 0, $iv);
+            file_put_contents($cacheFile, $enc);
+        }
+    }
+    echo json_encode(['status' => 'success', 'data' => $data]);
+    exit;
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/json');
@@ -863,6 +891,31 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
     .status-connected .conn-text { display: none; }
     .light-mode .conn-more { color: #333; text-shadow: 0 0 10px rgba(168, 85, 247, 0.5); }
     @keyframes dots { 0% { content: '.'; } 33% { content: '..'; } 66% { content: '...'; } }
+
+    /* Observatory Styles */
+    .market-list { padding:15px; }
+    .market-row-item { display:flex; justify-content:space-between; padding:15px; border-bottom:1px solid var(--border); align-items:center; background:rgba(255,255,255,0.02); margin-bottom:10px; border-radius:8px; }
+    .market-row-label { color:#888; font-size:0.9rem; }
+    .market-row-val { font-weight:bold; color:var(--accent); font-family:monospace; font-size:1.2rem; }
+    
+    .obs-header { padding:20px; border-bottom:1px solid var(--border); background:var(--panel); display:flex; justify-content:space-between; align-items:center; position:sticky; top:0; z-index:10; height:60px; box-sizing:border-box; }
+    .obs-title { font-size:1.3rem; font-weight:bold; color:var(--text); display:flex; align-items:center; gap:10px; }
+    .obs-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap:20px; padding:20px; }
+    .news-card-lg { background:var(--panel); border:1px solid var(--border); border-radius:12px; overflow:hidden; transition:transform 0.2s; cursor:pointer; display:flex; flex-direction:column; height:100%; }
+    .news-card-lg:hover { transform:translateY(-3px); box-shadow:0 5px 15px rgba(0,0,0,0.3); border-color:var(--accent); }
+    .news-card-body { padding:20px; flex:1; display:flex; flex-direction:column; }
+    .news-card-title { font-size:1.1rem; font-weight:bold; margin-bottom:10px; line-height:1.4; color:var(--text); }
+    .news-card-meta { font-size:0.8rem; color:#888; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center; }
+    .news-card-summary { font-size:0.9rem; color:#ccc; line-height:1.6; flex:1; margin-bottom:15px; }
+    .news-card-footer { padding:12px 20px; background:rgba(0,0,0,0.2); border-top:1px solid var(--border); font-size:0.8rem; color:#aaa; display:flex; justify-content:space-between; align-items:center; }
+    .news-tag { background:var(--accent); color:#fff; padding:2px 8px; border-radius:4px; font-size:0.7rem; font-weight:bold; }
+    .sentiment-dot { width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:5px; }
+    .news-impact { padding:12px; background:rgba(168, 85, 247, 0.08); border-left:3px solid var(--accent); border-radius:4px; font-size:0.85rem; color:#ddd; margin-top:auto; }
+    .news-impact strong { color:var(--accent); display:block; margin-bottom:5px; font-size:0.7rem; text-transform:uppercase; letter-spacing:1px; opacity:0.9; }
+    .rtl .news-impact { border-left:none; border-right:3px solid var(--accent); }
+    .rtl .sentiment-dot { margin-right:0; margin-left:5px; }
+    .news-summary-list { margin:0; padding:0 0 0 20px; list-style-type:disc; }
+    .rtl .news-summary-list { padding:0 20px 0 0; direction: rtl; }
 </style>
 </head>
 <body>
@@ -925,6 +978,11 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
         <div class="rail-btn" id="nav-public" onclick="switchTab('public')">
             <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
         </div>
+        <div class="rail-btn" id="nav-observatory" onclick="switchTab('observatory')">
+            
+<?xml version="1.0" encoding="utf-8"?><!-- Uploaded to: SVG Repo, www.svgrepo.com, Generator: SVG Repo Mixer Tools -->
+<svg fill="#000000" width="800px" height="800px" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M19.9,1.622a1,1,0,0,0-1.365-.52L1.562,9.388a1,1,0,0,0-.488,1.276L2.59,14.378A1,1,0,0,0,3.516,15a1.043,1.043,0,0,0,.24-.029L11,13.179v4.407L7.293,21.293a1,1,0,1,0,1.414,1.414L11,20.414V22a1,1,0,0,0,2,0V20.414l2.293,2.293a1,1,0,0,0,1.414-1.414L13,17.586v-4.9L22.24,10.4a1,1,0,0,0,.686-1.348ZM4.115,12.821l-.836-2.047L18.447,3.368l2.191,5.367Z"/></svg>
+        </div>
         
         <div style="flex:1" class="rail-spacer"></div>
         <div class="rail-btn desktop-only" id="nav-about" onclick="switchTab('about')">
@@ -986,6 +1044,12 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
                 <div id="online-count" style="font-size:4rem;font-weight:bold;color:var(--accent)">0</div>
             </div>
         </div>
+        <div id="tab-observatory" class="tab-content" style="display:none">
+            <div class="panel-header" data-i18n="tab_observatory">Observatory</div>
+            <div id="obs-market-list" class="market-list"></div>
+            <div style="padding:20px;text-align:center;color:#666;font-size:0.9rem" class="mobile-only">Select an item or view the feed on the right.</div>
+            <div style="padding:15px" class="mobile-only"><button class="btn-primary" style="width:100%" onclick="showObsFeed()">View News Feed</button></div>
+        </div>
         <div id="tab-settings" class="tab-content" style="display:none">
             <div class="panel-header" data-i18n="tab_settings">Settings</div>
             <div class="settings-panel">
@@ -1029,6 +1093,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
 
     <!-- MAIN CHAT -->
     <div class="main-view" id="main-view">
+        <div id="chat-view" style="display:flex;flex-direction:column;height:100%;width:100%;position:relative">
         <div class="chat-header">
             <div style="display:flex;align-items:center">
                 <div class="back-btn" onclick="closeChat()" style="cursor:pointer">&larr;</div>
@@ -1107,6 +1172,18 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
                 <span class="att-label" data-i18n="location">Location</span>
             </div>
         </div>
+        </div>
+        
+        <!-- OBSERVATORY VIEW -->
+        <div id="observatory-view" style="display:none;flex-direction:column;height:100%;width:100%;overflow-y:auto;background:var(--bg)">
+            <div class="obs-header">
+                <div class="obs-title"><div class="back-btn mobile-only" onclick="closeObs()" style="cursor:pointer;margin-right:10px">&larr;</div> <span data-i18n="tab_observatory">Observatory</span></div>
+                <div style="font-size:0.8rem;color:#888" id="obs-last-upd"></div>
+            </div>
+            <div id="obs-news-grid" class="obs-grid">
+                <div class="tab-loader"><div class="rail-letters"><span>m</span><span>o</span><span>R</span><span>e</span></div><div class="rail-dot"></div></div>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -1122,7 +1199,7 @@ let S = { tab:'chats', id:null, type:null, reply:null, ctx:null, dms:{}, groups:
 
 const TR = {
     en: {
-        tab_chats: "Chats", tab_groups: "Groups", tab_channels: "Channels", tab_public: "Public", tab_settings: "Settings", tab_about: "About",
+        tab_chats: "Chats", tab_groups: "Groups", tab_channels: "Channels", tab_public: "Public", tab_observatory: "Observatory", tab_settings: "Settings", tab_about: "About",
         search_chats: "Search chats...", search_groups: "Search groups...", search_channels: "Search channels...",
         online_users: "Online Users", bio: "Bio / Status", avatar_url: "Avatar URL", new_pass: "New Password", lang_select: "Language",
         toggle_theme: "Toggle Dark/Light Mode", enable_notif: "Enable Notifications", save: "Save", logout: "Logout", check_updates: "Check for Updates",
@@ -1131,10 +1208,11 @@ const TR = {
         camera: "Camera", gallery: "Gallery", file: "Document", location: "Location",
         type_msg: "Type a message...", type_enc: "Type an encrypted message...", only_owner: "Only owner can post",
         start_chat: "Start chatting", join_code: "Join via Code",
-        cancel: "CANCEL", preview: "Preview", send: "Send"
+        cancel: "CANCEL", preview: "Preview", send: "Send",
+        market_usd: "USD", market_oil: "Oil", market_updated: "Updated"
     },
     fa: {
-        tab_chats: "گفتگوها", tab_groups: "گروه‌ها", tab_channels: "کانال‌ها", tab_public: "عمومی", tab_settings: "تنظیمات", tab_about: "درباره",
+        tab_chats: "گفتگوها", tab_groups: "گروه‌ها", tab_channels: "کانال‌ها", tab_public: "عمومی", tab_observatory: "رصدخانه", tab_settings: "تنظیمات", tab_about: "درباره",
         search_chats: "جستجوی گفتگو...", search_groups: "جستجوی گروه...", search_channels: "جستجوی کانال...",
         online_users: "کاربران آنلاین", bio: "بیوگرافی / وضعیت", avatar_url: "آدرس آواتار", new_pass: "رمز عبور جدید", lang_select: "زبان / Language",
         toggle_theme: "تغییر پوسته (تاریک/روشن)", enable_notif: "فعال‌سازی اعلان‌ها", save: "ذخیره", logout: "خروج", check_updates: "بررسی بروزرسانی",
@@ -1143,7 +1221,8 @@ const TR = {
         camera: "دوربین", gallery: "گالری", file: "سند", location: "موقعیت",
         type_msg: "پیامی بنویسید...", type_enc: "پیام رمزگذاری شده...", only_owner: "فقط مالک می‌تواند پست بگذارد",
         start_chat: "شروع گفتگو", join_code: "عضویت با کد",
-        cancel: "لغو", preview: "پیش‌نمایش", send: "ارسال"
+        cancel: "لغو", preview: "پیش‌نمایش", send: "ارسال",
+        market_usd: "دلار", market_oil: "نفت", market_updated: "بروزرسانی"
     }
 };
 let curLang = localStorage.getItem('mw_lang') || 'en';
@@ -1622,12 +1701,72 @@ function switchTab(t){
     document.querySelectorAll('.tab-content').forEach(e=>e.style.display='none');
     
     if(t=='public') openChat('public', 'global');
+    if(t=='observatory') {
+        document.getElementById('chat-view').style.display='none';
+        document.getElementById('observatory-view').style.display='flex';
+        loadObservatory();
+    } else {
+        document.getElementById('observatory-view').style.display='none';
+        document.getElementById('chat-view').style.display='flex';
+    }
     document.getElementById('tab-'+t).style.display='block';
     if(t=='chats') document.getElementById('badge-chats').style.display='none';
     if(t=='groups') document.getElementById('badge-groups').style.display='none';
     if(t=='channels') document.getElementById('badge-channels').style.display='none';
     document.getElementById('nav-panel').classList.remove('hidden');
     document.getElementById('main-view').classList.remove('active');
+}
+
+function showObsFeed() {
+    document.getElementById('main-view').classList.add('active');
+}
+function closeObs() {
+    document.getElementById('main-view').classList.remove('active');
+}
+
+async function loadObservatory() {
+    let r = await fetch('?action=get_observatory');
+    let d = await r.json();
+    if(d.status !== 'success' || !d.data) return;
+    
+    const t = TR[curLang];
+    const m = d.data.market;
+    const n = d.data.news;
+    
+    // Market
+    let mh = '';
+    if(m.usd) mh += `<div class="market-row-item"><div class="market-row-label">${t.market_usd}</div><div class="market-row-val">${m.usd}</div></div>`;
+    if(m.oil) mh += `<div class="market-row-item"><div class="market-row-label">${t.market_oil}</div><div class="market-row-val">${m.oil}</div></div>`;
+    if(m.updated) mh += `<div class="market-row-item"><div class="market-row-label">${t.market_updated}</div><div class="market-row-val" style="font-size:1rem;color:#888">${m.updated}</div></div>`;
+    document.getElementById('obs-market-list').innerHTML = mh;
+    document.getElementById('obs-last-upd').innerText = t.market_updated + ': ' + (m.updated || '-');
+
+    // News
+    let nh = '';
+    n.forEach((item, i) => {
+        let title = curLang == 'fa' ? item.title_fa : item.title_en;
+        let summary = Array.isArray(item.summary) ? '<ul class="news-summary-list">' + item.summary.map(s => `<li>${s}</li>`).join('') + '</ul>' : item.summary;
+        let date = new Date(item.timestamp * 1000);
+        let timeStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+        let sentimentColor = item.sentiment > 0 ? '#4caf50' : (item.sentiment < 0 ? '#f44336' : '#9e9e9e');
+        let aiLabel = curLang == 'fa' ? 'تحلیل هوش مصنوعی' : 'AI Analysis';
+        let readMore = curLang == 'fa' ? 'بیشتر بخوانید &larr;' : 'Read More &rarr;';
+        let impact = item.impact ? `<div class="news-impact"><strong>${aiLabel}</strong>${item.impact}</div>` : '';
+        
+        nh += `<div class="news-card-lg" onclick="window.open('${item.url}', '_blank')">
+            <div class="news-card-body">
+                <div class="news-card-meta"><span class="news-tag">${item.tag}</span> <span style="display:flex;align-items:center"><span class="sentiment-dot" style="background:${sentimentColor}"></span> ${item.source}</span></div>
+                <div class="news-card-title">${title}</div>
+                <div class="news-card-summary">${summary}</div>
+                ${impact}
+            </div>
+            <div class="news-card-footer">
+                <span>${timeStr}</span>
+                <span>${readMore}</span>
+            </div>
+        </div>`;
+    });
+    document.getElementById('obs-news-grid').innerHTML = nh;
 }
 
 async function renderLists(){
@@ -1692,6 +1831,8 @@ async function openChat(t,i){
         if(c.scrollHeight - c.scrollTop - c.clientHeight > 50) S.scroll[S.type+'_'+S.id] = c.scrollTop;
         else delete S.scroll[S.type+'_'+S.id];
     }
+    document.getElementById('observatory-view').style.display='none';
+    document.getElementById('chat-view').style.display='flex';
     document.getElementById('we-overlay').style.display='none';
     if(S.id!=i) lastRead=0;
     S.type=t; S.id=i;

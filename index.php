@@ -2207,6 +2207,32 @@ function createMsgNode(m, showSender, history){
     div.oncontextmenu=(e)=>{
         e.preventDefault();
         showContextMenu(e, 'message', m);
+    };    
+    let touchTimer;
+    div.addEventListener('touchstart', (e) => {
+        touchTimer = setTimeout(() => {
+            // Long press detected
+            showContextMenu(e, 'message', m);
+        }, 500); // Adjust timing as needed
+    });
+
+    div.addEventListener('touchend', (e) => {
+        clearTimeout(touchTimer);
+    });
+
+    div.addEventListener('touchcancel', (e) => {
+        clearTimeout(touchTimer);
+    });
+
+    div.addEventListener('touchmove', (e) => {
+        clearTimeout(touchTimer);
+    });
+
+    div.onclick=()=>{
+        if (touchTimer) {
+            clearTimeout(touchTimer);
+        }
+        
     };
     div.ondblclick=()=>{ sendReact(m.timestamp, '❤️'); };
     return div;

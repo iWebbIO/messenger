@@ -113,6 +113,11 @@ try {
         $db->exec("PRAGMA user_version = 5");
     }
 
+    if ($ver < 6) {
+        $db->exec("CREATE TABLE IF NOT EXISTS auth_tokens (token TEXT PRIMARY KEY, user_id INTEGER, expires_at INTEGER)");
+        $db->exec("PRAGMA user_version = 6");
+    }
+
 } catch (PDOException $e) { die("DB Error: " . $e->getMessage()); }
 
 // -------------------------------------------------------------------------
@@ -292,11 +297,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             session_regenerate_id(true);
             $_SESSION['user'] = $row['username'];
             $_SESSION['uid'] = $row['id'];
-            echo json_encode(['status' => 'success']);
+            $token = bin2hex(random_bytes(32));
+            $db->prepare("INSERT INTO auth_tokens (token, user_id, expires_at) VALUES (?, ?, ?)")->execute([$token, $row['id'], time() + 2592000]);
+            echo json_encode(['status' => 'success', 'token' => $token]);
         } else { echo json_encode(['status' => 'error', 'message' => 'Invalid credentials']); }
         exit;
     }
     
+    if ($action === 'restore_session') {
+        $token = $input['token'] ?? '';
+        $stmt = $db->prepare("SELECT t.user_id, u.username FROM auth_tokens t JOIN users u ON t.user_id = u.id WHERE t.token = ? AND t.expires_at > ?");
+        $stmt->execute([$token, time()]);
+        $row = $stmt->fetch();
+        if ($row) {
+            session_regenerate_id(true);
+            $_SESSION['user'] = $row['username'];
+            $_SESSION['uid'] = $row['user_id'];
+            $db->prepare("UPDATE auth_tokens SET expires_at = ? WHERE token = ?")->execute([time() + 2592000, $token]);
+            echo json_encode(['status' => 'success']);
+        } else { echo json_encode(['status' => 'error']); }
+        exit;
+    }
+
     if ($action === 'request_observatory') {
         if (!isset($_SESSION['uid'])) exit;
         $db->prepare("UPDATE users SET observatory_access = 1 WHERE id = ?")->execute([$_SESSION['uid']]);
@@ -836,7 +858,17 @@ async function sub(){
         body:JSON.stringify({username:u,password:p})
     });
     let d=await r.json();
-    if(d.status=='success')location.reload();else{document.body.classList.remove('login-process');let e=document.getElementById('err');e.innerText=d.message;e.style.display='block';btn.disabled=false;applyLang();}
+    if(d.status=='success'){ if(d.token)localStorage.setItem('mw_auth_token',d.token); location.reload(); }
+    else{document.body.classList.remove('login-process');let e=document.getElementById('err');e.innerText=d.message;e.style.display='block';btn.disabled=false;applyLang();}
+}
+if(localStorage.getItem('mw_auth_token')){
+    document.body.classList.add('login-process');
+    fetch('?action=restore_session',{
+        method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF_TOKEN},
+        body:JSON.stringify({token:localStorage.getItem('mw_auth_token')})
+    }).then(r=>r.json()).then(d=>{
+        if(d.status=='success')location.reload(); else {localStorage.removeItem('mw_auth_token');document.body.classList.remove('login-process');}
+    }).catch(()=>{document.body.classList.remove('login-process');});
 }
 setLang(curLang);
 if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
@@ -1200,7 +1232,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
         <div class="rail-btn" id="nav-settings" onclick="switchTab('settings')">
             <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L3.16 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
         </div>
-        <div class="rail-btn desktop-only" onclick="if(confirm('Logout?'))location.href='?action=logout'" title="Logout">
+        <div class="rail-btn desktop-only" onclick="if(confirm('Logout?')){localStorage.removeItem('mw_auth_token');location.href='?action=logout'}" title="Logout">
             <svg viewBox="0 0 24 24"><path d="M10.09 15.59L11.5 17l5-5-5-5-1.41 1.41L12.67 11H3v2h9.67l-2.58 2.59zM19 3H5c-1.11 0-2 .9-2 2v4h2V5h14v14H5v-4H3v4c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg>
         </div>
     </div>
@@ -1290,7 +1322,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
                     <button class="btn-sec" style="margin-bottom:20px;cursor:pointer;padding:8px 16px;border-radius:20px" onclick="checkUpdates()" data-i18n="check_updates">Check for Updates</button><br>
                     <a href="https://github.com/iWebbIO/php-messenger" target="_blank" class="about-link">GitHub Repository</a>
                     <br><br>
-                    <button class="btn-sec" style="width:100%;padding:10px;border:1px solid #f55;color:#f55;border-radius:4px;cursor:pointer;background:transparent" onclick="if(confirm('Logout?'))location.href='?action=logout'" data-i18n="logout">Logout</button>
+                    <button class="btn-sec" style="width:100%;padding:10px;border:1px solid #f55;color:#f55;border-radius:4px;cursor:pointer;background:transparent" onclick="if(confirm('Logout?')){localStorage.removeItem('mw_auth_token');location.href='?action=logout'}" data-i18n="logout">Logout</button>
                 </div>
             </div>
         </div>

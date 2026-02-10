@@ -877,22 +877,29 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
     .rtl .msg-meta { text-align: left; }
     
     /* Custom Scrollbar */
-    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background-color: var(--sb-thumb); border-radius: 5px; border: 1px solid transparent; background-clip: content-box; }
+    ::-webkit-scrollbar-thumb { background-color: transparent; border-radius: 3px; }
+    
+    /* Show scrollbar on hover for specific containers */
+    .nav-rail:hover::-webkit-scrollbar-thumb,
+    .list-area:hover::-webkit-scrollbar-thumb,
+    .messages:hover::-webkit-scrollbar-thumb,
+    #observatory-view:hover::-webkit-scrollbar-thumb { background-color: var(--sb-thumb); }
+    
     ::-webkit-scrollbar-thumb:hover { background-color: var(--sb-hover); }
 
     /* Layout */
     .app-container { display:flex; width:100%; height:100%; }
-    .nav-rail { width:60px; background:var(--rail); border-right:1px solid var(--border); display:flex; flex-direction:column; align-items:center; padding-top:20px; z-index:10; }
-    .rail-btn { width:40px; height:40px; border-radius:10px; display:flex; align-items:center; justify-content:center; margin-bottom:15px; cursor:pointer; color:#888; transition:0.2s; position:relative; user-select:none; }
+    .nav-rail { width:60px; background:var(--rail); border-right:1px solid var(--border); display:flex; flex-direction:column; align-items:center; padding-top:20px; z-index:10; overflow-y:auto; min-height:0; }
+    .rail-btn { width:40px; height:40px; border-radius:10px; display:flex; align-items:center; justify-content:center; margin-bottom:15px; cursor:pointer; color:#888; transition:0.2s; position:relative; user-select:none; flex-shrink:0; }
     @media (hover: hover) { .rail-btn:hover { background:rgba(255,255,255,0.1); color:#fff; } }
     .rail-btn:active { transform: scale(0.95); background:rgba(255,255,255,0.1); }
     .rail-btn.active { background:var(--accent); color:#fff; }
     .rail-btn svg { width:24px; height:24px; fill:currentColor; }
     .rail-badge { position:absolute; top:-2px; right:-2px; background:red; border-radius:50%; width:10px; height:10px; display:none; border:2px solid var(--rail); }
 
-    .nav-panel { width:280px; background:var(--panel); border-right:1px solid var(--border); display:flex; flex-direction:column; }
+    .nav-panel { width:280px; background:var(--panel); border-right:1px solid var(--border); display:flex; flex-direction:column; min-height:0; }
     .panel-header { padding:20px; font-weight:bold; font-size:1.2rem; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
     .list-area { flex:1; overflow-y:auto; overscroll-behavior-y: contain; }
     .list-item { padding:15px; border-bottom:1px solid var(--border); display:flex; align-items:center; cursor:pointer; transition:0.2s; position:relative; user-select:none; }
@@ -901,7 +908,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
     .list-item.active { background:rgba(255,255,255,0.15); border-left:4px solid var(--accent); padding-left:11px; }
     .avatar { width:40px; height:40px; border-radius:50%; background:#444; margin-right:12px; display:flex; align-items:center; justify-content:center; font-weight:bold; background-size:cover; flex-shrink:0; }
     
-    .main-view { flex:1; display:flex; flex-direction:column; background:var(--bg); background-image:radial-gradient(var(--pattern) 1px, transparent 1px); background-size:20px 20px; position:relative; }
+    .main-view { flex:1; display:flex; flex-direction:column; background:var(--bg); background-image:radial-gradient(var(--pattern) 1px, transparent 1px); background-size:20px 20px; position:relative; min-height:0; }
     .chat-header { height:60px; background:var(--panel); border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; padding:0 20px; }
     .header-actions { display:flex; gap:15px; position:relative; }
     .chat-info-clickable { cursor: pointer; }
@@ -954,7 +961,8 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
     .btn-icon:active { transform: scale(0.9); background:rgba(255,255,255,0.15); }
     .btn-primary { background:var(--accent); color:#fff; border:none; padding:8px 16px; border-radius:20px; cursor:pointer; font-weight:bold; }
     
-    .settings-panel { padding:20px; text-align:center; }
+    .tab-content { display:flex; flex-direction:column; flex:1; min-height:0; }
+    .settings-panel { padding:20px; text-align:center; overflow-y:auto; flex:1; }
     .form-group { margin-top:15px; text-align:left; }
     .form-input { width:100%; padding:10px; background:var(--input-bg); border:1px solid var(--border); color:var(--text); border-radius:4px; margin-top:5px; outline:none; box-sizing:border-box; }
     .form-select { width:100%; padding:10px; background:var(--input-bg); border:1px solid var(--border); color:var(--text); border-radius:4px; margin-top:5px; outline:none; }
@@ -1239,7 +1247,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
                 </div>
             </div>
         </div>
-        <div id="tab-public" class="tab-content" style="display:none;height:100%">
+        <div id="tab-public" class="tab-content" style="display:none">
             <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%">
                 <div style="font-size:1.2rem;color:#888" data-i18n="online_users">Online Users</div>
                 <div id="online-count" style="font-size:4rem;font-weight:bold;color:var(--accent)">0</div>
@@ -1247,10 +1255,12 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
         </div>
         <div id="tab-observatory" class="tab-content" style="display:none">
             <div class="panel-header" data-i18n="tab_observatory">Observatory</div>
-            <div id="obs-clocks" style="padding:15px;border-bottom:1px solid var(--border);"></div>
-            <div id="obs-market-list" class="market-list"></div>
-            <div style="padding:20px;text-align:center;color:#666;font-size:0.9rem" class="mobile-only">Select an item or view the feed on the right.</div>
-            <div style="padding:15px" class="mobile-only"><button class="btn-primary" style="width:100%" onclick="showObsFeed()">View News Feed</button></div>
+            <div class="list-area">
+                <div id="obs-clocks" style="padding:15px;border-bottom:1px solid var(--border);"></div>
+                <div id="obs-market-list" class="market-list"></div>
+                <div style="padding:20px;text-align:center;color:#666;font-size:0.9rem" class="mobile-only">Select an item or view the feed on the right.</div>
+                <div style="padding:15px" class="mobile-only"><button class="btn-primary" style="width:100%" onclick="showObsFeed()">View News Feed</button></div>
+            </div>
         </div>
         <div id="tab-settings" class="tab-content" style="display:none">
             <div class="panel-header" data-i18n="tab_settings">Settings</div>
@@ -1287,7 +1297,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
         <!-- ABOUT TAB -->
         <div id="tab-about" class="tab-content desktop-only" style="display:none">
             <div class="panel-header" data-i18n="tab_about">About</div>
-            <div style="padding:20px; text-align:center; color:#ccc;">
+            <div class="list-area" style="padding:20px; text-align:center; color:#ccc;">
                 <h2>moreweb Messenger</h2>
                 <p style="color:#888;">Version 0.0.1</p>
                 <p data-i18n="about_desc">A secure, self-contained messenger with ephemeral server storage and local history persistence.</p>
@@ -1924,7 +1934,7 @@ function switchTab(t){
         document.getElementById('observatory-view').style.display='none';
         document.getElementById('chat-view').style.display='flex';
     }
-    document.getElementById('tab-'+t).style.display='block';
+    document.getElementById('tab-'+t).style.display='flex';
     if(t=='chats') document.getElementById('badge-chats').style.display='none';
     if(t=='groups') document.getElementById('badge-groups').style.display='none';
     if(t=='channels') document.getElementById('badge-channels').style.display='none';

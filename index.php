@@ -944,7 +944,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
 
     .input-area { padding:15px; background:var(--panel); display:flex; gap:10px; align-items:center; border-top:1px solid var(--border); padding-bottom: calc(15px + env(safe-area-inset-bottom)); }
     .input-wrapper { flex:1; position:relative; }
-    .reply-ctx { background:#2a2a2a; padding:6px 10px; border-radius:5px 5px 0 0; font-size:0.8rem; color:#aaa; display:none; justify-content:space-between; }
+    .reply-ctx { background:#2a2a2a; padding:6px 10px; border-radius:5px 5px 0 0; font-size:0.8rem; color:#aaa; display:none; justify-content:space-between; align-items:center; }
     input[type=text] { width:100%; padding:12px; border-radius:20px; border:none; background:var(--input-bg); color:var(--text); outline:none; box-sizing:border-box; }
     #txt { width:100%; padding:10px 12px; border-radius:20px; border:none; background:var(--input-bg); color:var(--text); outline:none; box-sizing:border-box; resize:none; height:40px; font-family:inherit; overflow-y:hidden; line-height:1.4; display:block; }
     
@@ -1264,6 +1264,14 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
                 <div class="form-group"><label data-i18n="lang_select">Language</label><select id="set-lang" class="form-select" onchange="setLang(this.value)"><option value="en">English</option><option value="fa">فارسی</option></select></div>
                 <div class="form-group"><button class="btn-sec" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:4px;cursor:pointer;background:var(--panel);color:var(--text)" onclick="toggleTheme()" data-i18n="toggle_theme">Toggle Dark/Light Mode</button></div>
                 <div class="form-group"><button class="btn-sec" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:4px;cursor:pointer;background:var(--panel);color:var(--text)" onclick="enableNotifs()" data-i18n="enable_notif">Enable Notifications</button></div>
+                <div class="form-group">
+                    <label>Font Size (<span id="lbl-fs">16px</span>)</label>
+                    <input type="range" id="set-fs" min="12" max="24" step="1" value="16" oninput="applyAppearance()" style="width:100%">
+                </div>
+                <div class="form-group">
+                    <label>Interface Scale (<span id="lbl-scale">100%</span>)</label>
+                    <input type="range" id="set-scale" min="70" max="130" step="5" value="100" oninput="applyAppearance()" style="width:100%">
+                </div>
                 <br><button class="btn-primary" onclick="saveSettings()" data-i18n="save">Save</button>
                 
                 <div class="mobile-only" style="margin-top:30px;border-top:1px solid var(--border);padding-top:20px">
@@ -1336,7 +1344,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
             <input type="file" id="file" hidden onchange="uploadFile(this)">
             <div class="input-wrapper">
                 <div class="reply-ctx" id="reply-ui">
-                    <span id="reply-txt"></span>
+                    <div id="reply-txt" style="flex:1;overflow:hidden;margin-right:10px"></div>
                 <button id="del-btn" style="display:none;font-size:0.8rem;color:#f55;margin-right:10px;background:none;border:none;cursor:pointer" onclick="deleteMsg()">Delete</button>
                     <span onclick="cancelReply()" style="cursor:pointer">&times;</span>
                 </div>
@@ -1583,6 +1591,10 @@ async function init(){
             } catch(e){ console.error("Migration error", e); }
         }
         if(localStorage.getItem('mw_theme')=='light') document.body.classList.add('light-mode');
+        let fs = localStorage.getItem('mw_fontsize');
+        let sc = localStorage.getItem('mw_scale');
+        if(fs) { document.body.style.fontSize = fs + 'px'; if(document.getElementById('set-fs')) { document.getElementById('set-fs').value = fs; document.getElementById('lbl-fs').innerText = fs + 'px'; } }
+        if(sc) { document.body.style.zoom = sc + '%'; if(document.getElementById('set-scale')) { document.getElementById('set-scale').value = sc; document.getElementById('lbl-scale').innerText = sc + '%'; } }
         setLang(curLang);
         pollLoop();
         window.addEventListener('online', () => setConn(false));
@@ -1766,7 +1778,7 @@ async function store(t,i,m){
     if(S.id==i && S.type==t) {
         let prev = h.length>1 ? h[h.length-2] : null;
         let show = (t=='public'||t=='group'||t=='channel') && m.from_user!=ME && (!prev || prev.from_user!=m.from_user);
-        document.getElementById('msgs').appendChild(createMsgNode(m, show));
+        document.getElementById('msgs').appendChild(createMsgNode(m, show, h));
         scrollToBottom(false);
     }
 }
@@ -2100,8 +2112,19 @@ async function openChat(t,i){
     if(t=='dm'){ let h=await get('dm',i); let last=h.filter(x=>x.from_user==i).pop(); if(last && last.timestamp>lastRead){ lastRead=last.timestamp; req('send',{to_user:i,type:'read',extra:last.timestamp}); } }
 }
 
-function createMsgNode(m, showSender){
+function scrollToMsg(ts){
+    let el = document.getElementById('msg-'+ts);
+    if(el) {
+        el.scrollIntoView({behavior:'smooth', block:'center'});
+        el.style.transition = 'background 0.5s';
+        el.style.background = 'var(--accent)';
+        setTimeout(()=>el.style.background='', 500);
+    }
+}
+
+function createMsgNode(m, showSender, history){
     let div=document.createElement('div');
+    div.id = 'msg-' + m.timestamp;
     div.className=`msg ${m.from_user==ME?'out':'in'} ${m.pinned?'pinned':''}`;
     let sender='';
     if(showSender) sender=`<div class="msg-sender" onclick="if(ME!='${m.from_user}'){openChat('dm','${m.from_user}');switchTab('chats');}">${m.from_user}</div>`;
@@ -2125,10 +2148,12 @@ function createMsgNode(m, showSender){
     }
     
     let rep='';
-    if(m.reply_to_id){
-        let h=get(S.type,S.id);
-        let p=h.find(x=>x.timestamp==m.reply_to_id);
-        if(p) rep=`<div style="font-size:0.8em;border-left:2px solid var(--accent);padding-left:4px;margin-bottom:4px;opacity:0.7">Reply: ${p.type=='image'?'Image':p.message.substring(0,20)}</div>`;
+    if(m.reply_to_id && history){
+        let p=history.find(x=>x.timestamp==m.reply_to_id);
+        if(p) {
+            let rTxt = p.type=='image'?'📷 Image':(p.type=='audio'?'🎤 Audio':(p.type=='file'?'📁 File':esc(p.message).substring(0,30)+'...'));
+            rep=`<div style="font-size:0.8em;border-left:2px solid var(--accent);padding-left:4px;margin-bottom:4px;opacity:0.7;cursor:pointer" onclick="scrollToMsg(${m.reply_to_id})">Reply to <b>${esc(p.from_user)}</b>: ${rTxt}</div>`;
+        }
     }
     let reacts='';
     if(m.reacts) reacts=`<div class="reaction-bar">${Object.values(m.reacts).join('')}</div>`;
@@ -2160,7 +2185,7 @@ async function renderChat(){
             lastDate = dateStr;
         }
         let show=(S.type=='public'||S.type=='group'||S.type=='channel') && m.from_user!=ME && m.from_user!=last;
-        c.appendChild(createMsgNode(m, show));
+        c.appendChild(createMsgNode(m, show, h));
         last=m.from_user;
     });
 }
@@ -2186,6 +2211,7 @@ async function send(){
     document.getElementById('txt').style.height='40px';
     toggleMainBtn();
     if(navigator.vibrate) navigator.vibrate(20);
+    let replyId = S.reply;
     cancelReply();
     
     let ts = Math.floor(Date.now()/1000);
@@ -2194,14 +2220,14 @@ async function send(){
         message: txt,
         type: 'text',
         timestamp: ts,
-        reply_to_id: S.reply,
+        reply_to_id: replyId,
         pending: true
     };
     await store(S.type, S.id, msgObj);
     scrollToBottom(true);
 
     // Prepare Network Request
-    let load = { message: txt, type: 'text', reply_to: S.reply, timestamp: ts };
+    let load = { message: txt, type: 'text', reply_to: replyId, timestamp: ts };
     if(S.type=='dm') load.to_user=S.id; else if(S.type=='group'||S.type=='channel') load.group_id=S.id; else if(S.type=='public') load.group_id=-1;
 
     if(S.type=='dm' && S.e2ee[S.id]){
@@ -2277,7 +2303,7 @@ async function ctxAction(act, arg) {
     if(c.type == 'message') {
         let m = c.data;
         if(act=='react') await sendReact(m.timestamp, arg);
-        else if(act=='reply') { S.reply=m.timestamp; document.getElementById('reply-ui').style.display='flex'; document.getElementById('reply-txt').innerText="Replying to "+m.from_user; document.getElementById('del-btn').style.display='none'; document.getElementById('txt').focus(); }
+        else if(act=='reply') { S.reply=m.timestamp; document.getElementById('reply-ui').style.display='flex'; let snip=m.type=='text'?esc(m.message).substring(0,30):'['+m.type+']'; document.getElementById('reply-txt').innerHTML=`<div style="font-size:0.75rem;color:var(--accent);margin-bottom:2px">Replying to ${m.from_user}</div><div style="color:var(--text);opacity:0.9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${snip}</div>`; document.getElementById('del-btn').style.display='none'; document.getElementById('txt').focus(); }
         else if(act=='forward') promptModal("Forward", "Username:", u=>{ if(u) req('send',{message:m.message,type:m.type,extra:m.extra_data,to_user:u}); });
         else if(act=='copy') { if(m.type=='text') { navigator.clipboard.writeText(m.message); showToast('Copied to clipboard'); } }
         else if(act=='pin') { let h=await get(S.type,S.id); let t=h.find(x=>x.timestamp==m.timestamp); if(t){t.pinned=!t.pinned; await save(S.type,S.id,h); renderChat();} }
@@ -2339,6 +2365,17 @@ async function deleteChat(){
 function toggleTheme(){
     document.body.classList.toggle('light-mode');
     localStorage.setItem('mw_theme', document.body.classList.contains('light-mode')?'light':'dark');
+}
+
+function applyAppearance(){
+    let fs = document.getElementById('set-fs').value;
+    let sc = document.getElementById('set-scale').value;
+    document.getElementById('lbl-fs').innerText = fs + 'px';
+    document.getElementById('lbl-scale').innerText = sc + '%';
+    document.body.style.fontSize = fs + 'px';
+    document.body.style.zoom = sc + '%';
+    localStorage.setItem('mw_fontsize', fs);
+    localStorage.setItem('mw_scale', sc);
 }
 
 function checkUpdates(){
@@ -2439,12 +2476,14 @@ function closePreview() {
 async function sendFile(fileToSend) {
     startProg();
     let ts = Math.floor(Date.now()/1000);
+    let replyId = S.reply;
+    cancelReply();
     
     // Optimistic Render
     let r = new FileReader();
     r.onload = async () => {
         let type = fileToSend.type.startsWith('image/') ? 'image' : 'file';
-        await store(S.type,S.id,{from_user:ME,message:r.result,type:type,timestamp:ts,extra_data:fileToSend.name, pending:true});
+        await store(S.type,S.id,{from_user:ME,message:r.result,type:type,timestamp:ts,extra_data:fileToSend.name, reply_to_id:replyId, pending:true});
         scrollToBottom(true);
     };
     r.readAsDataURL(fileToSend);
@@ -2452,6 +2491,7 @@ async function sendFile(fileToSend) {
     let fd = new FormData();
     fd.append('file', fileToSend);
     fd.append('timestamp', ts);
+    if(replyId) fd.append('reply_to', replyId);
     if(S.type=='dm') fd.append('to_user', S.id);
     else if(S.type=='group'||S.type=='channel') fd.append('group_id', S.id);
     else fd.append('group_id', -1);
@@ -2639,16 +2679,14 @@ async function startRec(){
         mediaRec=new MediaRecorder(s, opts); audChunks=[];
         mediaRec.ondataavailable=e=>{ if(e.data.size>0) audChunks.push(e.data); };
         mediaRec.start();
-        document.getElementById('txt').style.display='none'; document.getElementById('btn-send').style.display='none'; document.getElementById('btn-att').style.display='none'; document.getElementById('btn-mic').style.display='none';
         document.getElementById('txt').style.display='none'; document.getElementById('btn-send').style.display='none'; document.getElementById('btn-att').style.display='none';
         document.getElementById('rec-ui').style.display='flex';
-    }catch(e){alertModal('Error','Mic access denied');}
+    }catch(e){console.error(e);alertModal('Error','Mic access denied');}
 }
 function stopRec(send){
     if(!mediaRec || mediaRec.state==='inactive')return;
     mediaRec.onstop=()=>{
         mediaRec.stream.getTracks().forEach(t=>t.stop());
-        document.getElementById('txt').style.display='block'; document.getElementById('btn-send').style.display='flex'; document.getElementById('btn-att').style.display='flex'; document.getElementById('btn-mic').style.display='flex';
         document.getElementById('txt').style.display='block'; document.getElementById('btn-send').style.display='flex'; document.getElementById('btn-att').style.display='flex';
         document.getElementById('rec-ui').style.display='none';
         if(send && audChunks.length > 0){

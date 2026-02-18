@@ -13,6 +13,7 @@ ini_set('post_max_size', '20M');
 // ADMIN CREDENTIALS
 $adminUser = '';
 $adminPass = ''; // Set these to enable Admin Panel
+$enableEncryption = true; // Set to false to disable encryption features
 
 // -------------------------------------------------------------------------
 // 1. CONFIGURATION & DATABASE
@@ -116,6 +117,12 @@ try {
     if ($ver < 6) {
         $db->exec("CREATE TABLE IF NOT EXISTS auth_tokens (token TEXT PRIMARY KEY, user_id INTEGER, expires_at INTEGER)");
         $db->exec("PRAGMA user_version = 6");
+    }
+
+    if ($ver < 7) {
+        $cols = $db->query("PRAGMA table_info(users)")->fetchAll(PDO::FETCH_COLUMN, 1);
+        if (!in_array('is_banned', $cols)) $db->exec("ALTER TABLE users ADD COLUMN is_banned INTEGER DEFAULT 0");
+        $db->exec("PRAGMA user_version = 7");
     }
 
 } catch (PDOException $e) { die("DB Error: " . $e->getMessage()); }
@@ -244,6 +251,7 @@ if (isset($_SESSION['admin']) && !empty($adminUser)) {
         exit;
     }
     if ($action === 'admin_logout') {
+        session_unset();
         session_destroy();
         header("Location: index.php");
         exit;
@@ -326,6 +334,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
+    if ($action === 'delete_account') {
+        $db->prepare("DELETE FROM users WHERE id = ?")->execute([$myId]);
+        $db->prepare("DELETE FROM group_members WHERE user_id = ?")->execute([$myId]);
+        $db->prepare("DELETE FROM messages WHERE from_user = ? OR to_user = ?")->execute([$me, $me]);
+        $db->prepare("DELETE FROM groups WHERE owner_id = ?")->execute([$myId]);
+        session_destroy();
+        echo json_encode(['status'=>'success']);
+        exit;
+    }
+
     // ADMIN ACTIONS
     if (isset($_SESSION['admin']) && !empty($adminUser)) {
         if ($action === 'admin_delete_user') {
@@ -357,6 +375,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $uid = $input['id'];
             $val = $input['allow'] ? 2 : 0;
             $db->prepare("UPDATE users SET observatory_access = ? WHERE id = ?")->execute([$val, $uid]);
+            echo json_encode(['status'=>'success']);
+            exit;
+        }
+        if ($action === 'admin_ban_user') {
+            $uid = $input['id'];
+            $val = $input['ban'] ? 1 : 0;
+            $db->prepare("UPDATE users SET is_banned = ? WHERE id = ?")->execute([$val, $uid]);
             echo json_encode(['status'=>'success']);
             exit;
         }
@@ -396,8 +421,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (strlen($msg) > 15000000) { echo json_encode(['status'=>'error','message'=>'Message too long']); exit; }
 
         if (isset($input['to_user'])) {
+            // Check existence and normalize case
+            $stmt = $db->prepare("SELECT username FROM users WHERE lower(username) = lower(?)");
+            $stmt->execute([$input['to_user']]);
+            $realUser = $stmt->fetchColumn();
+            if (!$realUser) { echo json_encode(['status'=>'error','message'=>'User not found']); exit; }
+
             $stmt = $db->prepare("INSERT INTO messages (from_user, to_user, message, type, reply_to_id, extra_data, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)");
-            $stmt->execute([$me, $input['to_user'], $msg, $type, $reply, $extra, $ts]);
+            $stmt->execute([$me, $realUser, $msg, $type, $reply, $extra, $ts]);
         } else if (isset($input['group_id'])) {
             if ($input['group_id'] != -1) {
                 $chk = $db->prepare("SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?");
@@ -437,8 +468,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $reply = $_POST['reply_to'] ?? null;
         
         if (!empty($_POST['to_user'])) {
+            // Check existence and normalize case
+            $stmt = $db->prepare("SELECT username FROM users WHERE lower(username) = lower(?)");
+            $stmt->execute([$_POST['to_user']]);
+            $realUser = $stmt->fetchColumn();
+            if (!$realUser) { echo json_encode(['status'=>'error','message'=>'User not found']); exit; }
             $stmt = $db->prepare("INSERT INTO messages (from_user, to_user, message, type, reply_to_id, extra_data, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)");
-            $stmt->execute([$me, $_POST['to_user'], $msg, $type, $reply, $extra, $ts]);
+            $stmt->execute([$me, $realUser, $msg, $type, $reply, $extra, $ts]);
         } else if (!empty($_POST['group_id'])) {
             if ($_POST['group_id'] != -1) {
                 $chk = $db->prepare("SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?");
@@ -540,6 +576,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $me = $_SESSION['user'];
         $myId = $_SESSION['uid'];
 
+        $stmt = $db->prepare("SELECT is_banned FROM users WHERE id = ?");
+        $stmt->execute([$myId]);
+        if ($stmt->fetchColumn()) {
+            session_destroy();
+            echo json_encode(['status'=>'banned']);
+            exit;
+        }
+
         if (!isset($_SESSION['last_seen_upd']) || time() - $_SESSION['last_seen_upd'] > 60) {
             $db->prepare("UPDATE users SET last_seen = ? WHERE id = ?")->execute([time(), $myId]);
             $_SESSION['last_seen_upd'] = time();
@@ -600,7 +644,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $stmt->execute([$lastPub]);
         $pubMsgs = $stmt->fetchAll();
 
-        echo json_encode(['profile' => $myProfile->fetch(), 'dms' => $dms, 'groups' => $myGroups, 'group_msgs' => $grpMsgs, 'public_msgs' => $pubMsgs, 'online' => $online->fetchAll(), 'typing' => $typing->fetchAll(PDO::FETCH_COLUMN)]);
+        echo json_encode(['profile' => $myProfile->fetch(), 'dms' => $dms, 'groups' => $myGroups, 'group_msgs' => $grpMsgs, 'public_msgs' => $pubMsgs, 'online' => $online->fetchAll(), 'typing' => $typing->fetchAll(PDO::FETCH_COLUMN), 'config' => ['encryption' => $enableEncryption]]);
         exit;
     }
 }
@@ -635,7 +679,7 @@ if ($action === 'logout') { session_destroy(); header("Location: index.php"); ex
     .section h2 { margin-top: 0; color: #ccc; font-size: 1.2rem; margin-bottom: 20px; }
     table { width: 100%; border-collapse: collapse; }
     th, td { text-align: left; padding: 12px; border-bottom: 1px solid #2f1b42; font-size: 0.9rem; }
-    th { color: #888; font-weight: 500; }
+    th { color: #888; font-weight: 500; text-transform: uppercase; font-size: 0.8rem; }
     tr:last-child td { border-bottom: none; }
     .action-btn { padding: 4px 8px; font-size: 0.8rem; }
 </style>
@@ -652,7 +696,7 @@ if ($action === 'logout') { session_destroy(); header("Location: index.php"); ex
         <h2>Users</h2>
         <div style="overflow-x:auto">
             <table id="users-table">
-                <thead><tr><th>ID</th><th>Username</th><th>Joined</th><th>Last Seen</th><th>Observatory</th><th>Action</th></tr></thead>
+                <thead><tr><th>ID</th><th>Username</th><th>Joined</th><th>Last Seen</th><th>Observatory</th><th>Actions</th></tr></thead>
                 <tbody></tbody>
             </table>
         </div>
@@ -689,7 +733,7 @@ async function loadData() {
             else if(u.observatory_access == 2) obsBtn = `<span style="color:#4caf50;margin-right:5px">Active</span><button class="btn btn-danger action-btn" style="padding:2px 6px;font-size:0.7rem" onclick="apprObs(${u.id}, 0)">Revoke</button>`;
             else obsBtn = `<span style="color:#666">None</span>`;
             
-            uh += `<tr><td>${u.id}</td><td>${u.username}</td><td>${new Date(u.joined_at*1000).toLocaleDateString()}</td><td>${new Date(u.last_seen*1000).toLocaleString()}</td><td>${obsBtn}</td><td><button class="btn btn-danger action-btn" onclick="delUser(${u.id}, '${u.username}')">Delete</button></td></tr>`;
+            uh += `<tr><td>${u.id}</td><td>${u.username}</td><td>${new Date(u.joined_at*1000).toLocaleDateString()}</td><td>${new Date(u.last_seen*1000).toLocaleString()}</td><td>${obsBtn}</td><td><button class="btn action-btn" style="background:#f59e0b;margin-right:5px" onclick="banUser(${u.id}, 1)">Ban</button><button class="btn btn-danger action-btn" onclick="delUser(${u.id}, '${u.username}')">Delete</button></td></tr>`;
         });
         document.querySelector('#users-table tbody').innerHTML = uh || '<tr><td colspan="6">No users found</td></tr>';
 
@@ -703,19 +747,25 @@ async function loadData() {
 }
 async function delUser(id, name) {
     if(confirm(`Delete user ${name}? This cannot be undone.`)) {
-        await fetch('?action=admin_delete_user', {method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF_TOKEN}, body:JSON.stringify({id})});
-        loadData();
+        let r = await fetch('?action=admin_delete_user', {method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF_TOKEN}, body:JSON.stringify({id})});
+        if((await r.json()).status=='success') loadData();
+    }
+}
+async function banUser(id, ban) {
+    if(confirm(`Ban user ${id}?`)) {
+        let r = await fetch('?action=admin_ban_user', {method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF_TOKEN}, body:JSON.stringify({id, ban})});
+        if((await r.json()).status=='success') loadData();
     }
 }
 async function delGroup(id) {
     if(confirm(`Delete group ${id}?`)) {
-        await fetch('?action=admin_delete_group', {method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF_TOKEN}, body:JSON.stringify({id})});
-        loadData();
+        let r = await fetch('?action=admin_delete_group', {method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF_TOKEN}, body:JSON.stringify({id})});
+        if((await r.json()).status=='success') loadData();
     }
 }
 async function apprObs(id, allow) {
-    await fetch('?action=admin_approve_observatory', {method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF_TOKEN}, body:JSON.stringify({id, allow})});
-    loadData();
+    let r = await fetch('?action=admin_approve_observatory', {method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF_TOKEN}, body:JSON.stringify({id, allow})});
+    if((await r.json()).status=='success') loadData();
 }
 loadData();
 </script>
@@ -1002,7 +1052,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
 
     /* Modal */
     .modal-overlay { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:1000; display:none; align-items:center; justify-content:center; }
-    .modal-box { background:var(--panel); padding:20px; border-radius:12px; width:300px; border:1px solid var(--border); box-shadow:0 10px 30px #000; }
+    .modal-box { background:var(--panel); padding:20px; border-radius:12px; width:300px; border:1px solid var(--border); box-shadow:0 10px 30px #000; position:relative; }
     .modal-title { margin:0 0 10px 0; font-size:1.1rem; font-weight:bold; }
     .modal-body { color:#ccc; font-size:0.9rem; margin-bottom:15px; }
     .modal-btns { display:flex; justify-content:flex-end; gap:10px; margin-top:20px; }
@@ -1188,6 +1238,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
 <!-- MODAL SYSTEM -->
 <div id="app-modal" class="modal-overlay">
     <div class="modal-box">
+        <div class="btn-icon" style="position:absolute;top:10px;right:10px;width:30px;height:30px" onclick="document.getElementById('app-modal').style.display='none'">&times;</div>
         <h3 id="modal-title" class="modal-title"></h3>
         <div id="modal-body" class="modal-body"></div>
         <input id="modal-input" type="text" class="form-input" style="display:none">
@@ -1232,7 +1283,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
         <div class="rail-btn" id="nav-settings" onclick="switchTab('settings')">
             <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L3.16 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
         </div>
-        <div class="rail-btn desktop-only" onclick="if(confirm('Logout?')){localStorage.removeItem('mw_auth_token');location.href='?action=logout'}" title="Logout">
+        <div class="rail-btn desktop-only" onclick="doLogout()" title="Logout">
             <svg viewBox="0 0 24 24"><path d="M10.09 15.59L11.5 17l5-5-5-5-1.41 1.41L12.67 11H3v2h9.67l-2.58 2.59zM19 3H5c-1.11 0-2 .9-2 2v4h2V5h14v14H5v-4H3v4c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg>
         </div>
     </div>
@@ -1322,7 +1373,8 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
                     <button class="btn-sec" style="margin-bottom:20px;cursor:pointer;padding:8px 16px;border-radius:20px" onclick="checkUpdates()" data-i18n="check_updates">Check for Updates</button><br>
                     <a href="https://github.com/iWebbIO/php-messenger" target="_blank" class="about-link">GitHub Repository</a>
                     <br><br>
-                    <button class="btn-sec" style="width:100%;padding:10px;border:1px solid #f55;color:#f55;border-radius:4px;cursor:pointer;background:transparent" onclick="if(confirm('Logout?')){localStorage.removeItem('mw_auth_token');location.href='?action=logout'}" data-i18n="logout">Logout</button>
+                    <button class="btn-sec" style="width:100%;padding:10px;border:1px solid #f55;color:#f55;border-radius:4px;cursor:pointer;background:transparent" onclick="doLogout()" data-i18n="logout">Logout</button>
+                    <button class="btn-sec" style="width:100%;padding:10px;border:1px solid #f55;color:#f55;border-radius:4px;cursor:pointer;background:transparent;margin-top:10px" onclick="deleteAccount()">Delete Account</button>
                 </div>
             </div>
         </div>
@@ -1445,6 +1497,7 @@ const CSRF_TOKEN = "<?php echo $_SESSION['csrf_token']; ?>";
 let lastTyping = 0;
 let lastRead = 0;
 let mediaRec=null, audChunks=[], recMime='';
+let config = { encryption: true };
 let pendingFile = null;
 let currentAudio=null, currentBtn=null, updateInterval=null;
 let S = { tab:'chats', id:null, type:null, reply:null, ctx:null, dms:{}, groups:{}, online:[], notifs:[], keys:{pub:null,priv:null}, e2ee:{}, we:{active:false, ready:[]}, scroll:{} };
@@ -1699,6 +1752,8 @@ async function poll(){
         if(pubH.length) lastPub = pubH[pubH.length-1].id || 0;
         let r=await req('poll', {last_pub: lastPub});
         let d=await r.json();
+        if(d.status === 'banned') { doLogout(); return; }
+        if(d.config) config = d.config;
         setConn(true);
         S.online=d.online;
         if(d.profile){
@@ -1709,6 +1764,7 @@ async function poll(){
         }
         for(let m of d.dms){
             if(m.type=='delete'){ await removeMsg('dm',m.from_user,m.extra_data); continue; }
+            if(m.type=='delete_chat'){ await dbOp('readwrite', s=>s.delete(`mw_dm_${m.from_user}`)); if(S.id==m.from_user) closeChat(); continue; }
             if(m.type=='read'){ 
                 let h=await get('dm',m.from_user); 
                 h.forEach(x=>{if(x.from_user==ME && x.timestamp<=m.extra_data)x.read=true}); 
@@ -1730,10 +1786,11 @@ async function poll(){
         }
         S.groups={}; for(let g of d.groups){ S.groups[g.id]=g; let ex=await get('group',g.id); if(!ex.length) await save('group',g.id,[]); }
         for(let m of d.group_msgs){ 
-            if(m.type=='delete'){ await removeMsg('group',m.group_id,m.extra_data); continue; }
-            await store('group',m.group_id,m); 
+            let type = (S.groups[m.group_id] && S.groups[m.group_id].category == 'channel') ? 'channel' : 'group';
+            if(m.type=='delete'){ await removeMsg(type,m.group_id,m.extra_data); continue; }
+            await store(type,m.group_id,m); 
             let prev = m.type==='text' ? m.message : '['+m.type+']';
-            notify(m.group_id, prev, 'group'); 
+            notify(m.group_id, prev, type); 
         }
         for(let m of d.public_msgs){
             await store('public','global',m);
@@ -1831,6 +1888,7 @@ async function removeMsg(t,i,ts){
 }
 
 function toggleEncryption(){
+    if(!config.encryption) { alertModal('Info', 'Encryption is disabled by server configuration.'); return; }
     if(S.type=='dm') startE2EE();
     else if(S.type=='group') startWEncrypt();
 }
@@ -1875,6 +1933,7 @@ async function dec(u,c,i){
 
 // --- WENCRYPT (GROUP E2EE) ---
 async function startWEncrypt(){
+    if(!config.encryption) return;
     if(!confirm("WEncrypt cannot be disabled once started. All members must be online. Proceed?")) return;
     S.we.active = true;
     S.we.ready = [];
@@ -2171,7 +2230,7 @@ function createMsgNode(m, showSender, history){
     let sender='';
     if(showSender) sender=`<div class="msg-sender" onclick="if(ME!='${m.from_user}'){openChat('dm','${m.from_user}');switchTab('chats');}">${m.from_user}</div>`;
 
-    let txt=esc(m.message);
+    let txt=linkify(esc(m.message));
     if(m.type=='image') txt=`<img src="${m.message.replace(/"/g, '&quot;')}" onclick="window.open(this.src)" onload="scrollToBottom(false)">`;
     else if(m.type=='audio') txt=`<div class="audio-player">
             <button class="play-btn" onclick="playAudio(this)">
@@ -2236,6 +2295,11 @@ function createMsgNode(m, showSender, history){
     };
     div.ondblclick=()=>{ sendReact(m.timestamp, '❤️'); };
     return div;
+}
+
+function linkify(text) {
+    var urlRegex =/(\b(https?|ftp|file):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
+    return text.replace(urlRegex, function(url) { return '<a href="' + url + '" target="_blank" style="color:var(--accent);text-decoration:underline">' + url + '</a>'; });
 }
 
 async function renderChat(){
@@ -2426,7 +2490,12 @@ async function exportChat(){
     a.click(); toggleMenu();
 }
 async function deleteChat(){
-    if(!confirm("Delete chat permanently?")) return;
+    if(S.type == 'dm') {
+        if(confirm("Delete for everyone? (Sends delete signal to other user)")) {
+            req('send', {to_user:S.id, type:'delete_chat', message:'DELETE_CHAT'});
+        }
+    }
+    if(!confirm("Delete local history?")) return;
     await dbOp('readwrite', s=>s.delete(`mw_${S.type}_${S.id}`));
     closeChat(); switchTab('chats'); toggleMenu();
 }
@@ -2663,7 +2732,7 @@ async function showProfilePopup() {
                 Joined: ${new Date(p.joined_at*1000).toLocaleDateString()}<br>
                 Last Seen: ${new Date(p.last_seen*1000).toLocaleString()}
             </div>
-            ${!S.e2ee[S.id] ? `<button class="btn-sec" style="margin-top:15px;width:100%" onclick="startE2EE();document.getElementById('app-modal').style.display='none'">Enable End-to-End Encryption</button>` : `<div style="margin-top:15px;color:var(--accent)">🔒 Encrypted</div>`}
+            ${config.encryption ? (!S.e2ee[S.id] ? `<button class="btn-sec" style="margin-top:15px;width:100%" onclick="startE2EE();document.getElementById('app-modal').style.display='none'">Enable End-to-End Encryption</button>` : `<div style="margin-top:15px;color:var(--accent)">🔒 Encrypted</div>`) : ''}
         </div>`;
         alertModal("Profile", ""); document.getElementById('modal-body').innerHTML = html;
     } else if (S.type === 'group' || S.type === 'channel') {
@@ -2677,7 +2746,7 @@ async function showProfilePopup() {
             <b>${d.group.name}</b><br>
             <span style="color:#888;font-size:0.8rem">${d.group.category=='channel'?'Channel':'Group'} - ${d.group.type} ${d.group.join_code ? '| Code: '+d.group.join_code : ''}</span><br>
             ${d.is_owner && d.group.type=='private' ? `<button class="btn-sec" style="font-size:0.7rem;margin-top:5px" onclick="groupSettings(${S.id})">Manage Invite</button>` : ''}
-            ${!S.e2ee[S.id] && d.group.category!='channel' ? `<button class="btn-sec" style="margin-top:10px;width:100%" onclick="startWEncrypt();document.getElementById('app-modal').style.display='none'">Enable WEncrypt</button>` : ``}
+            ${config.encryption && !S.e2ee[S.id] && d.group.category!='channel' ? `<button class="btn-sec" style="margin-top:10px;width:100%" onclick="startWEncrypt();document.getElementById('app-modal').style.display='none'">Enable WEncrypt</button>` : ``}
         </div>
         <div style="max-height:200px;overflow-y:auto;text-align:left;margin-bottom:15px;background:#222;padding:10px;border-radius:8px">
             <div style="font-size:0.8rem;color:#aaa;margin-bottom:5px">Members (${d.members.length})</div>
@@ -2847,6 +2916,17 @@ document.getElementById('txt').oninput=function(){
     toggleMainBtn();
     if(S.type=='dm' && Date.now()-lastTyping>2000){ lastTyping=Date.now(); req('typing',{to:S.id}); }
 };
+document.getElementById('txt').addEventListener('paste', e => {
+    if(e.clipboardData && e.clipboardData.items){
+        for(let i=0; i<e.clipboardData.items.length; i++){
+            let item = e.clipboardData.items[i];
+            if(item.type.indexOf("image") !== -1){
+                let blob = item.getAsFile();
+                uploadFile({files:[blob], value:''}); // Mock input
+            }
+        }
+    }
+});
 document.getElementById('msgs').onscroll = (e)=>{
     let c=e.target;
     let b=document.getElementById('scroll-btn');
@@ -2919,6 +2999,22 @@ function updateWorldClocks() {
     el.innerHTML = h;
 }
 setInterval(updateWorldClocks, 1000);
+
+async function doLogout() {
+    if(confirm('Logout?')) {
+        localStorage.clear();
+        await dbOp('readwrite', s=>s.clear());
+        location.href='?action=logout';
+    }
+}
+
+async function deleteAccount() {
+    if(confirm('Are you sure you want to delete your account? This action is irreversible.')) {
+        let r = await fetch('?action=delete_account', {method:'POST', headers:{'X-CSRF-Token': CSRF_TOKEN}});
+        let d = await r.json();
+        if(d.status=='success') doLogout();
+    }
+}
 
 if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
 init().catch(e=>console.error(e));

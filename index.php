@@ -1171,6 +1171,7 @@ Promise.all([
             }
         });
     }
+});
 window.addEventListener('load', () => {
     const stage = document.getElementById('stage');
     setTimeout(() => {

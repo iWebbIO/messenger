@@ -1653,7 +1653,6 @@ window.addEventListener('load', () => {
             <div class="conn-text">Connecting<span class="conn-dots"></span></div>
         </div>
         <div id="tab-chats" class="tab-content">
-            <div style="padding:10px 15px 5px 15px"><input type="text" id="chat-search" class="form-input" placeholder="Search chats..." onkeyup="renderLists()" style="margin:0;padding:10px 15px;border-radius:20px" autocomplete="off"></div>
             <div style="padding:10px 15px 5px 15px"><input type="text" id="chat-search" class="form-input" placeholder="Search chats..." oninput="debouncedRender()" style="margin:0;padding:10px 15px;border-radius:20px" autocomplete="off"></div>
             <div class="panel-header" style="padding-top:5px;padding-bottom:5px;border-bottom:none"><span data-i18n="tab_chats">Chats</span> <div class="btn-icon" onclick="promptChat()">+</div></div>
             <div class="list-area" id="list-chats">
@@ -1664,7 +1663,6 @@ window.addEventListener('load', () => {
             </div>
         </div>
         <div id="tab-groups" class="tab-content" style="display:none">
-            <div style="padding:10px 15px 5px 15px"><input type="text" id="group-search" class="form-input" placeholder="Search groups..." onkeyup="renderLists()" style="margin:0;padding:10px 15px;border-radius:20px" autocomplete="off"></div>
             <div style="padding:10px 15px 5px 15px"><input type="text" id="group-search" class="form-input" placeholder="Search groups..." oninput="debouncedRender()" style="margin:0;padding:10px 15px;border-radius:20px" autocomplete="off"></div>
             <div class="panel-header" style="padding-top:5px;padding-bottom:5px;border-bottom:none"><span data-i18n="tab_groups">Groups</span> 
                 <div style="display:flex;gap:5px">
@@ -1680,7 +1678,6 @@ window.addEventListener('load', () => {
             </div>
         </div>
         <div id="tab-channels" class="tab-content" style="display:none">
-            <div style="padding:10px 15px 5px 15px"><input type="text" id="channel-search" class="form-input" placeholder="Search channels..." onkeyup="renderLists()" style="margin:0;padding:10px 15px;border-radius:20px" autocomplete="off"></div>
             <div style="padding:10px 15px 5px 15px"><input type="text" id="channel-search" class="form-input" placeholder="Search channels..." oninput="debouncedRender()" style="margin:0;padding:10px 15px;border-radius:20px" autocomplete="off"></div>
             <div class="panel-header" style="padding-top:5px;padding-bottom:5px;border-bottom:none"><span data-i18n="tab_channels">Channels</span> <div style="display:flex;gap:5px"><div class="btn-icon" onclick="discover('channel')" title="Discover Channels">🌍</div><div class="btn-icon" onclick="createChannel()" title="Create Channel">+</div></div></div>
             <div style="padding:0 15px 10px 15px"><button class="form-input" style="cursor:pointer;border-radius:20px;text-align:center;background:var(--bg);border:1px solid var(--border)" onclick="joinGroup()">Join via Code</button></div>

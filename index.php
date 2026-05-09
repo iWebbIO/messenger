@@ -1010,33 +1010,9 @@ loadData();
     @keyframes gradientBG { 0% {background-position: 0% 50%;} 50% {background-position: 100% 50%;} 100% {background-position: 0% 50%;} }
     #login-bg { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 0; background: linear-gradient(-45deg, #0f0518, #3b0764, #6b21a8, #0f0518); background-size: 400% 400%; animation: gradientBG 3s ease infinite; opacity: 0; transition: opacity 1.5s ease-in-out; }
     body.login-process #login-bg { opacity: 1; }
-    @keyframes letterAppear { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
-    .splash-screen { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: #000000; z-index: 9999; display: flex; justify-content: center; align-items: center; pointer-events: none; transition: opacity 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
-    .splash-screen .word { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 0.15em; color: #FFFFFF; font-family: 'Poppins', sans-serif; font-weight: 100; font-size: clamp(8rem, 15vw, 10rem); line-height: 0.8; text-shadow: 0 0 30px #bf00ff; direction: ltr; opacity: 0; }
-    .splash-screen .letter { display: flex; justify-content: center; align-items: center; }
-    .splash-screen .m-letter { position: relative; display: inline-flex; justify-content: center; align-items: center; border-radius: 50%; }
-    .splash-screen .m-letter::after { content: ''; position: absolute; top: 53%; left: 50%; width: 2.2em; height: 2.2em; border: 2px solid rgba(191, 0, 255, 0.15); border-top: 2px solid #bf00ff; border-radius: 50%; opacity: 0; pointer-events: none; box-shadow: 0 0 20px rgba(191, 0, 255, 0.4); }
-    .fonts-loaded .splash-screen .word { opacity: 1; animation: focusOnM 0.7s cubic-bezier(0.76, 0, 0.24, 1) 0.2s forwards; }
-    .fonts-loaded .splash-screen .letter-fade { animation: fadeOut 0.7s cubic-bezier(0.76, 0, 0.24, 1) 0.2s forwards; }
-    .fonts-loaded .splash-screen .m-letter::after { animation: fadeInRing 0.7s cubic-bezier(0.76, 0, 0.24, 1) 0.2s forwards, spinRing 1.2s linear 0.2s infinite; }
-    @keyframes focusOnM { 0% { transform: scale(1) translate(0, 0); } 100% { transform: scale(0.7) translate(25%, 25%); } }
-    @keyframes fadeOut { 0% { opacity: 1; } 100% { opacity: 0; } }
-    @keyframes fadeInRing { 0% { opacity: 0; } 100% { opacity: 1; } }
-    @keyframes spinRing { 0% { transform: translate(-50%, -50%) rotate(0deg); } 100% { transform: translate(-50%, -50%) rotate(360deg); } }
-
 </style>
 </head>
 <body>
-
-<div class="splash-screen" id="login-splash">
-    <div class="word">
-        <div class="letter"><span class="m-letter">m</span></div>
-        <div class="letter letter-fade">o</div>
-        <div class="letter letter-fade">r</div>
-        <div class="letter letter-fade">e</div>
-    </div>
-</div>
-
 <div class="lang-toggle">
     <div class="lang-opt active" id="l-en" onclick="setLang('en')">EN</div>
     <div class="lang-opt" id="l-fa" onclick="setLang('fa')">فا</div>
@@ -1154,24 +1130,6 @@ if(localStorage.getItem('mw_auth_token')){
 setLang(curLang);
 if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
 
-Promise.all([
-    new Promise(resolve => document.addEventListener('DOMContentLoaded', resolve)),
-    document.fonts.ready
-]).then(() => {
-    document.body.classList.add('fonts-loaded');
-    const splash = document.getElementById('login-splash');
-    if (splash) {
-        const word = splash.querySelector('.word');
-        word.addEventListener('animationend', (e) => {
-            if (e.animationName === 'focusOnM') {
-                setTimeout(() => {
-                    splash.style.opacity = '0';
-                    setTimeout(() => { splash.remove(); }, 400);
-                }, 250); 
-            }
-        });
-    }
-});
 window.addEventListener('load', () => {
     const stage = document.getElementById('stage');
     setTimeout(() => {
@@ -1518,19 +1476,6 @@ window.addEventListener('load', () => {
     }
     @media (min-width: 851px) { .back-btn { display:none; } .mobile-only { display: none !important; } }
 
-    /* Splash Screen Main App */
-    .splash-screen { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: #000000; z-index: 9999; display: flex; justify-content: center; align-items: center; pointer-events: none; transition: opacity 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
-    .splash-screen .word { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 0.15em; color: #FFFFFF; font-family: 'Poppins', sans-serif; font-weight: 100; font-size: clamp(8rem, 15vw, 10rem); line-height: 0.8; text-shadow: 0 0 30px #bf00ff; direction: ltr; opacity: 0; }
-    .splash-screen .letter { display: flex; justify-content: center; align-items: center; }
-    .splash-screen .m-letter { position: relative; display: inline-flex; justify-content: center; align-items: center; border-radius: 50%; }
-    .splash-screen .m-letter::after { content: ''; position: absolute; top: 53%; left: 50%; width: 2.2em; height: 2.2em; border: 2px solid rgba(191, 0, 255, 0.15); border-top: 2px solid #bf00ff; border-radius: 50%; opacity: 0; pointer-events: none; box-shadow: 0 0 20px rgba(191, 0, 255, 0.4); }
-    .fonts-loaded .splash-screen .word { opacity: 1; animation: focusOnM 0.7s cubic-bezier(0.76, 0, 0.24, 1) 0.2s forwards; }
-    .fonts-loaded .splash-screen .letter-fade { animation: fadeOut 0.7s cubic-bezier(0.76, 0, 0.24, 1) 0.2s forwards; }
-    .fonts-loaded .splash-screen .m-letter::after { animation: fadeInRing 0.7s cubic-bezier(0.76, 0, 0.24, 1) 0.2s forwards, spinRing 1.2s linear 0.2s infinite; }
-    @keyframes focusOnM { 0% { transform: scale(1) translate(0, 0); } 100% { transform: scale(0.7) translate(25%, 25%); } }
-    @keyframes fadeOut { 0% { opacity: 1; } 100% { opacity: 0; } }
-    @keyframes fadeInRing { 0% { opacity: 0; } 100% { opacity: 1; } }
-    @keyframes spinRing { 0% { transform: translate(-50%, -50%) rotate(0deg); } 100% { transform: translate(-50%, -50%) rotate(360deg); } }
     @keyframes letterAppear { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
 
     /* Connection Indicator */
@@ -1596,16 +1541,6 @@ window.addEventListener('load', () => {
 </style>
 </head>
 <body>
-
-<div id="app-splash" class="splash-screen">
-    <div class="word">
-        <div class="letter"><span class="m-letter">m</span></div>
-        <div class="letter letter-fade">o</div>
-        <div class="letter letter-fade">r</div>
-        <div class="letter letter-fade">e</div>
-    </div>
-</div>
-
 <!-- LOADING SYSTEM -->
 <div id="progress-bar-container">
     <div id="progress-bar"></div>
@@ -5982,28 +5917,7 @@ lbImg.addEventListener('touchend', () => { lbIsDragging=false; });
 
 if('serviceWorker' in navigator)navigator.serviceWorker.register('?action=sw');
 init().catch(e=>console.error(e));
-
 setTimeout(() => sendWSyncSignal('hello'), 2000);
-
-Promise.all([
-    new Promise(resolve => document.addEventListener('DOMContentLoaded', resolve)),
-    document.fonts.ready
-]).then(() => {
-    document.body.classList.add('fonts-loaded');
-    const splash = document.getElementById('app-splash');
-    if (splash) {
-        const word = splash.querySelector('.word');
-        word.addEventListener('animationend', (e) => {
-            if (e.animationName === 'focusOnM') {
-                setTimeout(() => {
-                    splash.style.opacity = '0';
-                    setTimeout(() => { splash.remove(); }, 400);
-                }, 250); 
-            }
-        });
-    }
-});
-
 </script>
 </body>
 </html>

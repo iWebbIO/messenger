@@ -971,34 +971,46 @@ loadData();
 <?php endif; ?>
 <?php if ($localPoppins): ?><style>@font-face{font-family:'Poppins';src:url('<?php echo $localPoppins; ?>') format('truetype');font-weight:100;font-style:normal;}</style><?php endif; ?>
 <style>
-    body { background: #0f0518; color: #eee; font-family: 'Roboto', sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; overflow: hidden; }
-    
-    .box { background: #1a0b2e; padding: 48px 40px 36px; border-radius: 12px; width: 400px; max-width: 90%; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 1px solid #2f1b42; position: relative; z-index: 10; display: flex; flex-direction: column; align-items: center; }
-    
-    .welcome-text { font-weight: 100; font-size: 3.5rem; margin-bottom: 10px; color: #fff; letter-spacing: -0.5px; text-shadow: 0 0 20px rgba(168, 85, 247, 0.5); }
-    
-    h2 { font-weight: 400; font-size: 1.1rem; margin: 0 0 40px 0; color: #aaa; }
-    
-    input { width: 100%; padding: 13px 15px; margin: 0 0 15px 0; background: #261038; border: 1px solid #2f1b42; color: #fff; border-radius: 6px; box-sizing: border-box; font-family: inherit; font-size: 1rem; transition: 0.2s; }
-    input:focus { border-color: #a855f7; outline: none; box-shadow: 0 0 10px rgba(168, 85, 247, 0.3); }
-    
-    button { width: 100%; padding: 12px 0; background: #a855f7; color: #fff; border: none; border-radius: 6px; font-weight: bold; font-size: 0.9rem; cursor: pointer; font-family: inherit; margin-top: 20px; transition: background 0.2s; box-shadow: 0 4px 15px rgba(168, 85, 247, 0.4); }
-    button:hover { background: #9333ea; }
-    
-    #toggle-text { color: #a855f7; cursor: pointer; font-size: 0.875rem; margin-top: 25px; font-weight: 500; }
-    #admin-link { color: #666; cursor: pointer; font-size: 0.75rem; margin-top: 15px; display: block; }
-
-    @keyframes gradientBG { 0% {background-position: 0% 50%;} 50% {background-position: 100% 50%;} 100% {background-position: 0% 50%;} }
-    #login-bg {
-        position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 0;
-        background: linear-gradient(-45deg, #0f0518, #3b0764, #6b21a8, #0f0518);
-        background-size: 400% 400%;
-        animation: gradientBG 3s ease infinite;
-        opacity: 0; transition: opacity 1.5s ease-in-out;
+    :root { --purple: #a855f7; --glow-color: rgba(147, 51, 234, 0.3); }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+        background-color: #000; height: 100vh; overflow: hidden; font-family: 'Poppins', sans-serif;
+        display: flex; justify-content: center; align-items: center;
+        background-image: 
+            radial-gradient(circle at 20% 20%, var(--glow-color) 0%, transparent 40%),
+            radial-gradient(circle at 80% 80%, var(--glow-color) 0%, transparent 40%),
+            radial-gradient(circle at 50% 50%, rgba(138, 43, 226, 0.15) 0%, transparent 60%);
     }
+    #stage { position: relative; z-index: 10; display: flex; justify-content: center; align-items: center; width: 100%; height: 100%; }
+    .logo-grid { display: grid; grid-template-columns: repeat(2, 100px); grid-template-rows: repeat(2, 85px); transition: all 0.8s cubic-bezier(0.7, 0, 0.3, 1); }
+    .letter { font-size: 6rem; font-weight: 100; color: white; text-align: center; line-height: 1; transition: all 0.7s cubic-bezier(0.7, 0, 0.3, 1); text-shadow: 0 0 30px rgba(168, 85, 247, 0.5); user-select: none; }
+    .implode .logo-grid { transform: scale(0); filter: blur(20px); opacity: 0; }
+    .implode .letter:nth-child(1) { transform: translate(50px, 42px); }
+    .implode .letter:nth-child(2) { transform: translate(-50px, 42px); }
+    .implode .letter:nth-child(3) { transform: translate(50px, -42px); }
+    .implode .letter:nth-child(4) { transform: translate(-50px, -42px); }
+    #auth-card { position: absolute; width: 320px; opacity: 0; transform: scale(1.1); filter: blur(10px); transition: all 1s cubic-bezier(0.2, 1, 0.3, 1); pointer-events: none; }
+    .active-stage #auth-card { opacity: 1; transform: scale(1); filter: blur(0); pointer-events: all; transition-delay: 0.4s; }
+    .tabs { display: flex; justify-content: flex-start; gap: 25px; margin-bottom: 30px; padding-left: 5px; }
+    .tab { color: rgba(255, 255, 255, 0.3); cursor: pointer; font-weight: 100; font-size: 1.1rem; letter-spacing: 2px; transition: 0.3s; border-bottom: 1px solid transparent; padding-bottom: 4px; }
+    .tab.active { color: white; border-bottom: 1px solid var(--purple); text-shadow: 0 0 10px var(--purple); }
+    input { width: 100%; padding: 15px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; color: white; margin-bottom: 15px; font-family: inherit; outline: none; transition: 0.4s; }
+    input:focus { background: rgba(168, 85, 247, 0.1); border-color: var(--purple); box-shadow: 0 0 20px rgba(168, 85, 247, 0.2); }
+    .btn { width: 100%; padding: 15px; background: white; border: none; border-radius: 8px; font-weight: 400; cursor: pointer; transition: 0.4s; font-family: inherit; }
+    .btn:hover { background: var(--purple); color: white; box-shadow: 0 0 30px var(--purple); }
+    .btn:disabled { opacity: 0.5; cursor: default; }
+    .hide { display: none; }
+    .lang-toggle { position: absolute; top: 20px; right: 20px; display: flex; gap: 15px; z-index: 20; }
+    .lang-opt { font-weight: 500; color: #9aa0a6; cursor: pointer; transition: 0.2s; font-size: 0.9rem; }
+    .lang-opt.active { color: #e8eaed; font-weight: 700; }
+    .rtl { direction: rtl; }
+    .github-link-login { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); color: #a855f7; text-decoration: none; font-size: 0.9rem; display: flex; align-items: center; gap: 8px; z-index: 20; transition: color 0.2s; }
+    .github-link-login:hover { color: #d8b4fe; }
+    #err { color: #f55; font-size: 0.85rem; margin-bottom: 15px; text-align: left; padding-left: 5px; }
+    @keyframes gradientBG { 0% {background-position: 0% 50%;} 50% {background-position: 100% 50%;} 100% {background-position: 0% 50%;} }
+    #login-bg { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 0; background: linear-gradient(-45deg, #0f0518, #3b0764, #6b21a8, #0f0518); background-size: 400% 400%; animation: gradientBG 3s ease infinite; opacity: 0; transition: opacity 1.5s ease-in-out; }
     body.login-process #login-bg { opacity: 1; }
-
-    /* Splash Screen */
+    @keyframes letterAppear { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
     .splash-screen { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: #000000; z-index: 9999; display: flex; justify-content: center; align-items: center; pointer-events: none; transition: opacity 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
     .splash-screen .word { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 0.15em; color: #FFFFFF; font-family: 'Poppins', sans-serif; font-weight: 100; font-size: clamp(8rem, 15vw, 10rem); line-height: 0.8; text-shadow: 0 0 30px #bf00ff; direction: ltr; opacity: 0; }
     .splash-screen .letter { display: flex; justify-content: center; align-items: center; }
@@ -1011,28 +1023,7 @@ loadData();
     @keyframes fadeOut { 0% { opacity: 1; } 100% { opacity: 0; } }
     @keyframes fadeInRing { 0% { opacity: 0; } 100% { opacity: 1; } }
     @keyframes spinRing { 0% { transform: translate(-50%, -50%) rotate(0deg); } 100% { transform: translate(-50%, -50%) rotate(360deg); } }
-    @keyframes letterAppear { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
 
-    .lang-toggle { position: absolute; top: 20px; right: 20px; display: flex; gap: 15px; z-index: 20; }
-    .lang-opt { font-weight: 500; color: #9aa0a6; cursor: pointer; transition: 0.2s; font-size: 0.9rem; }
-    .lang-opt.active { color: #e8eaed; font-weight: 700; }
-    .rtl { direction: rtl; }
-
-    .github-link-login {
-        position: absolute;
-        bottom: 20px;
-        left: 50%;
-        transform: translateX(-50%);
-        color: #a855f7;
-        text-decoration: none;
-        font-size: 0.9rem;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        z-index: 20;
-        transition: color 0.2s;
-    }
-    .github-link-login:hover { color: #d8b4fe; }
 </style>
 </head>
 <body>
@@ -1052,12 +1043,33 @@ loadData();
 </div>
 
 <div id="login-bg"></div>
-<div class="box">
-    <div class="welcome-text">Welcome</div>
-    <h2 id="ttl">moreweb Messenger</h2><div id="err" style="color:#f55;display:none;margin-bottom:10px"></div>
-    <input id="u" placeholder="Username" autocomplete="username"><input type="password" id="p" placeholder="Password" autocomplete="current-password">
-    <button onclick="sub()">Sign In</button>
-    <div id="toggle-text" onclick="toggleMode()">Need an account? Create one</div>
+<div id="stage">
+    <div class="logo-grid" id="logo">
+        <div class="letter">m</div>
+        <div class="letter">o</div>
+        <div class="letter">r</div>
+        <div class="letter">e</div>
+    </div>
+
+    <div id="auth-card">
+        <div id="ttl" style="font-weight:100;font-size:3rem;color:white;margin-bottom:10px;text-shadow:0 0 20px rgba(168,85,247,0.5)">Welcome</div>
+        <div class="tabs">
+            <div class="tab active" id="t-login" onclick="switchTab('login')">login</div>
+            <div class="tab" id="t-register" onclick="switchTab('register')">register</div>
+        </div>
+        <div id="err" style="color:#f55;display:none;margin-bottom:15px;font-size:0.875rem"></div>
+        <div id="login-form">
+            <input type="text" id="li-u" placeholder="username" autocomplete="username">
+            <input type="password" id="li-p" placeholder="password" autocomplete="current-password">
+            <button class="btn" onclick="sub()">Sign In</button>
+        </div>
+
+        <div id="register-form" class="hide">
+            <input type="text" id="rg-u" placeholder="username" autocomplete="username">
+            <input type="password" id="rg-p" placeholder="password" autocomplete="new-password">
+            <button class="btn" onclick="sub()">Register</button>
+        </div>
+    </div>
 </div>
 
 <a href="https://github.com/iWebbIO/php-messenger" target="_blank" class="github-link-login">
@@ -1068,8 +1080,8 @@ loadData();
 const CSRF_TOKEN = "<?php echo $_SESSION['csrf_token']; ?>";
 let reg=false;
 const TR = {
-    en: { ttl: "moreweb Messenger", signin: "Sign In", signup: "Sign Up", user: "Username", pass: "Password", no_acc: "Need an account? Create one", has_acc: "Already have an account? Sign In", create: "Create Account", err: "Please fill in all fields", proc: "Processing..." },
-    fa: { ttl: "پیام‌رسان موروب", signin: "ورود", signup: "ثبت نام", user: "نام کاربری", pass: "رمز عبور", no_acc: "حساب ندارید؟ یکی بسازید", has_acc: "حساب دارید؟ وارد شوید", create: "ایجاد حساب", err: "لطفا تمام فیلدها را پر کنید", proc: "در حال پردازش..." }
+    en: { ttl: "Welcome", signin: "Sign In", signup: "Sign Up", user: "Username", pass: "Password", no_acc: "Need an account? Create one", has_acc: "Already have an account? Sign In", create: "Create Account", err: "Please fill in all fields", proc: "Processing..." },
+    fa: { ttl: "خوش آمدید", signin: "ورود", signup: "ثبت نام", user: "نام کاربری", pass: "رمز عبور", no_acc: "حساب ندارید؟ یکی بسازید", has_acc: "حساب دارید؟ وارد شوید", create: "ایجاد حساب", err: "لطفا تمام فیلدها را پر کنید", proc: "در حال پردازش..." }
 };
 let curLang = localStorage.getItem('mw_lang') || 'en';
 
@@ -1082,28 +1094,39 @@ function setLang(l) {
 }
 function applyLang() {
     const t = TR[curLang];
-    document.getElementById('ttl').innerText = reg ? t.create : t.ttl;
-    document.getElementById('u').placeholder = t.user;
-    document.getElementById('p').placeholder = t.pass;
-    document.querySelector('button').innerText = reg ? t.signup : t.signin;
-    document.getElementById('toggle-text').innerText = reg ? t.has_acc : t.no_acc;
+    document.getElementById('ttl').innerText = t.ttl;
+    document.getElementById('t-login').innerText = t.signin.toLowerCase();
+    document.getElementById('t-register').innerText = t.signup.toLowerCase();
+    document.getElementById('li-u').placeholder = t.user.toLowerCase();
+    document.getElementById('rg-u').placeholder = t.user.toLowerCase();
+    document.getElementById('li-p').placeholder = t.pass.toLowerCase();
+    document.getElementById('rg-p').placeholder = t.pass.toLowerCase();
+    document.querySelector('#login-form .btn').innerText = t.signin;
+    document.querySelector('#register-form .btn').innerText = t.signup;
 }
-function toggleMode() {
-    reg = !reg;
-    applyLang();
+function switchTab(mode) {
+    reg = (mode === 'register');
+    const tabs = document.querySelectorAll('.tab');
+    const login = document.getElementById('login-form');
+    const register = document.getElementById('register-form');
+    tabs.forEach(t => t.classList.remove('active'));
+    if(!reg) {
+        tabs[0].classList.add('active'); login.classList.remove('hide'); register.classList.add('hide');
+    } else {
+        tabs[1].classList.add('active'); login.classList.add('hide'); register.classList.remove('hide');
+    }
     document.getElementById('err').style.display = 'none';
 }
+
 async function sub(){
-    let u=document.getElementById('u').value.trim(),p=document.getElementById('p').value;
+    let u = reg ? document.getElementById('rg-u').value.trim() : document.getElementById('li-u').value.trim();
+    let p = reg ? document.getElementById('rg-p').value : document.getElementById('li-p').value;
     if(!u||!p){let e=document.getElementById('err');e.innerText="Please fill in all fields";e.style.display='block';return;}
     document.body.classList.add('login-process');
-    let btn=document.querySelector('button');btn.disabled=true;btn.innerText=TR[curLang].proc;
+    let btn = reg ? document.querySelector('#register-form .btn') : document.querySelector('#login-form .btn');
+    btn.disabled=true; let oldText = btn.innerText; btn.innerText=TR[curLang].proc;
     try {
-        let r=await fetch('?action='+(reg?'register':'login'),{
-            method:'POST',
-            headers: {'Content-Type': 'application/json', 'X-CSRF-Token': CSRF_TOKEN},
-            body:JSON.stringify({username:u,password:p})
-        });
+        let r=await fetch('?action='+(reg?'register':'login'),{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF_TOKEN},body:JSON.stringify({username:u,password:p})});
         let txt = await r.text();
         let d;
         try { d = JSON.parse(txt); } catch(e) { throw new Error(txt.substring(0, 150) || 'Server Error'); }
@@ -1111,7 +1134,8 @@ async function sub(){
         if(d.status=='success'){ if(d.token)localStorage.setItem('mw_auth_token',d.token); location.reload(); }
         else{ throw new Error(d.message); }
     } catch(e) {
-        document.body.classList.remove('login-process');let el=document.getElementById('err');el.innerText=e.message;el.style.display='block';btn.disabled=false;applyLang();
+        document.body.classList.remove('login-process');
+        let el=document.getElementById('err');el.innerText=e.message;el.style.display='block';btn.disabled=false;btn.innerText=oldText;
     }
 }
 if(localStorage.getItem('mw_auth_token')){
@@ -1147,6 +1171,16 @@ Promise.all([
             }
         });
     }
+window.addEventListener('load', () => {
+    const stage = document.getElementById('stage');
+    setTimeout(() => {
+        stage.classList.add('implode');
+        setTimeout(() => {
+            stage.classList.add('active-stage');
+            // Auto-focus first input
+            document.getElementById('li-u').focus();
+        }, 200);
+    }, 1500);
 });
 </script></body></html>
 <?php exit; } ?>

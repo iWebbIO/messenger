@@ -1,4 +1,4 @@
-# moreweb Messenger
+# moreweb Messenger (Development will be resumed soon)
 
 ![Version](https://img.shields.io/badge/version-0.0.3-blue.svg)
 ![PHP](https://img.shields.io/badge/PHP-7.4%2B-purple.svg)
